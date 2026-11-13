@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}User Management — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">RBAC authorization</p><h1>System Accounts</h1><p>Customers, staff, and administrators have separate operational workspaces.</p></div></header>
+    <nav class="filter-tabs" aria-label="Filter by role"><a class="{% if not selected_role %}active{% endif %}" href="{{ url_for('admin.users') }}">All</a><a class="{% if selected_role == 'customer' %}active{% endif %}" href="{{ url_for('admin.users', role='customer') }}">Customers</a><a class="{% if selected_role == 'employee' %}active{% endif %}" href="{{ url_for('admin.users', role='employee') }}">Staff</a><a class="{% if selected_role == 'admin' %}active{% endif %}" href="{{ url_for('admin.users', role='admin') }}">Admins</a></nav>
+    <section class="panel"><div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Contact</th><th>City</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody>{% for user in users %}<tr><td><strong>{{ user['full_name'] }}</strong><small>{{ user['email'] }}</small></td><td><span class="role-badge role-{{ user['role'] }}">{{ user['role'] }}</span></td><td>{{ user['phone'] or '—' }}</td><td>{{ user['city'] or '—' }}</td><td>{{ user['created_at'] | datetime_en }}</td><td><span class="status {% if user['is_active'] %}status-active{% else %}status-inactive{% endif %}">{% if user['is_active'] %}active{% else %}locked{% endif %}</span></td><td><form action="{{ url_for('admin.toggle_user', user_id=user['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button {% if user['is_active'] %}danger{% endif %}" type="submit" {% if user['id'] == g.user['id'] %}disabled title="You cannot lock your own account"{% endif %}>{% if user['is_active'] %}Lock{% else %}Unlock{% endif %}</button></form></td></tr>{% endfor %}</tbody></table></div></section>
+  </section>
+</div>
+{% endblock %}

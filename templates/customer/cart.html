@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% from 'components/category_icon.html' import category_svg %}
+{% block title %}Shopping Cart — QuocDat Marketplace{% endblock %}
+{% block content %}
+<div class="checkout-stepper" aria-label="Checkout progress">
+  <span class="step active"><b>01</b> Shopping Cart</span>
+  <span class="step-line"></span>
+  <span class="step"><b>02</b> Shipping &amp; Payment</span>
+  <span class="step-line"></span>
+  <span class="step"><b>03</b> Sales Invoice</span>
+</div>
+<section class="page-heading"><div><p class="eyebrow">Your shopping cart</p><h1>Review before checkout</h1></div><a class="text-link" href="{{ url_for('catalog.products') }}">← Continue shopping</a></section>
+{% if items %}
+{% set ship_pct = [((subtotal / 500000) * 100)|int, 100]|min %}
+<section class="cart-layout">
+  <div class="cart-list">
+    <div class="shipping-progress">
+      <div class="shipping-progress-text">
+        {% if subtotal >= 500000 %}
+          <strong>🎉 Free shipping unlocked!</strong><span>Your order qualifies for VND 0 delivery.</span>
+        {% else %}
+          <strong>Add {{ (500000 - subtotal) | money }} more for free shipping</strong><span>{{ ship_pct }}% toward VND 500,000 threshold</span>
+        {% endif %}
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width: {{ ship_pct }}%"></div></div>
+    </div>
+    {% for item in items %}
+    <article class="cart-item">
+      <div class="cart-thumb product-media {% if not item['image_url'] %}is-studio{% endif %}">
+        {% if item['image_url'] %}<img src="{{ item['image_url'] }}" alt="{{ item['name'] }}" onerror="this.closest('.product-media').classList.add('is-studio'); this.remove();">{% endif %}
+        <div class="studio-fallback" aria-hidden="true"><span class="studio-icon">{{ category_svg(item['category_name']) }}</span></div>
+      </div>
+      <div class="cart-item-copy"><small>{{ item['platform_name'] }} · {{ item['product_code'] }}</small><h2><a href="{{ url_for('catalog.product_detail', product_id=item['id']) }}">{{ item['name'] }}</a></h2><strong>{{ item['current_price'] | money }}</strong></div>
+      <form class="quantity-form" action="{{ url_for('customer.update_cart', item_id=item['cart_item_id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Quantity<input type="number" name="quantity" value="{{ item['quantity'] }}" min="0" max="{{ item['stock_quantity'] }}"></label><button class="button button-small button-secondary" type="submit">Update</button></form>
+      <div class="cart-line-total"><strong>{{ item['line_total'] | money }}</strong><form action="{{ url_for('customer.remove_from_cart', item_id=item['cart_item_id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger" type="submit">Remove</button></form></div>
+    </article>
+    {% endfor %}
+  </div>
+  <aside class="order-summary"><p class="eyebrow">Order summary</p><dl><div><dt>Subtotal</dt><dd>{{ subtotal | money }}</dd></div><div><dt>Shipping</dt><dd>{{ shipping_fee | money }}</dd></div><div class="summary-total"><dt>Total</dt><dd>{{ total | money }}</dd></div></dl><a class="button button-block" href="{{ url_for('customer.checkout') }}">Proceed to checkout →</a><small>Free shipping on orders from VND 500,000.</small></aside>
+</section>
+{% else %}<div class="empty-state"><strong>Your cart is empty</strong><p>Explore our catalog integrated from two marketplaces.</p><a class="button" href="{{ url_for('catalog.products') }}">Start shopping</a></div>{% endif %}
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}Goods Receipt History — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">OLTP documents</p><h1>Goods Receipt History</h1><p>Each receipt line becomes one row in Fact_Procurement after ETL.</p></div><a class="button" href="{{ url_for('employee.new_procurement') }}">+ Create receipt</a></header>
+    <section class="panel">
+      {% if receipts %}<div class="table-wrap"><table>
+        <thead><tr><th>Receipt</th><th>Supplier</th><th>Warehouse</th><th>Staff member</th><th class="number">Lines</th><th class="number">Quantity</th><th class="number">Total</th></tr></thead>
+        <tbody>{% for receipt in receipts %}<tr><td><a class="table-link" href="{{ url_for('employee.procurement_detail', receipt_id=receipt['id']) }}">{{ receipt['receipt_number'] }}</a><small>{{ receipt['received_at'] | datetime_en }}</small></td><td>{{ receipt['supplier_name'] }}</td><td>{{ receipt['warehouse_name'] }}</td><td>{{ receipt['employee_name'] }}</td><td class="number">{{ receipt['line_count'] }}</td><td class="number">{{ receipt['total_units'] }}</td><td class="number"><strong>{{ receipt['total_cost'] | money }}</strong></td></tr>{% endfor %}</tbody>
+      </table></div>{% else %}<div class="empty-state"><strong>No procurement data yet</strong><p>Create the first receipt to begin the workflow.</p></div>{% endif %}
+      <nav class="pagination" aria-label="Pagination">{% if page > 1 %}<a href="{{ url_for('employee.procurements', page=page-1) }}">← Previous</a>{% endif %}<span>Page {{ page }} / {{ pages }}</span>{% if page < pages %}<a href="{{ url_for('employee.procurements', page=page+1) }}">Next →</a>{% endif %}</nav>
+    </section>
+  </section>
+</div>
+{% endblock %}

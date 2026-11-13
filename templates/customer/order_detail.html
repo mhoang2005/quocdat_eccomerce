@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}{{ order['order_number'] }} — QuocDat Marketplace{% endblock %}
+{% block content %}
+<div class="checkout-stepper" aria-label="Order completed">
+  <span class="step done"><b>✓</b> Shopping Cart</span>
+  <span class="step-line done"></span>
+  <span class="step done"><b>✓</b> Shipping &amp; Payment</span>
+  <span class="step-line done"></span>
+  <span class="step active"><b>03</b> Sales Invoice</span>
+</div>
+<section class="invoice-shell">
+  <div class="invoice-head">
+    <div><p class="eyebrow">Sales invoice</p><h1>{{ order['invoice_number'] }}</h1><p>Order {{ order['order_number'] }} · {{ order['issued_at'] | datetime_en }}</p></div>
+    <div class="invoice-head-actions">
+      <span class="status status-{{ order['status'] }}">{{ order['status'] }}</span>
+      <button type="button" class="button button-small button-secondary no-print" onclick="window.print()">Print invoice</button>
+    </div>
+  </div>
+  <div class="invoice-meta"><div><small>Customer</small><strong>{{ g.user['full_name'] }}</strong><span>{{ g.user['email'] }}</span></div><div><small>Ship to</small><strong>{{ order['shipping_city'] }}</strong><span>{{ order['shipping_address'] }}</span></div><div><small>Payment</small><strong>{{ order['payment_method'] }}</strong><span>{{ order['transaction_ref'] }}</span></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Product</th><th>Platform</th><th class="number">Qty</th><th class="number">Unit price</th><th class="number">Line total</th></tr></thead><tbody>{% for item in items %}<tr><td><strong>{{ item['name'] }}</strong><small>{{ item['product_code'] }}</small></td><td>{{ item['platform_name'] }}</td><td class="number">{{ item['quantity'] }}</td><td class="number">{{ item['unit_price'] | money }}</td><td class="number"><strong>{{ item['line_total'] | money }}</strong></td></tr>{% endfor %}</tbody></table></div>
+  <div class="invoice-total"><dl><div><dt>Subtotal</dt><dd>{{ order['subtotal'] | money }}</dd></div><div><dt>Shipping</dt><dd>{{ order['shipping_fee'] | money }}</dd></div><div><dt>Total paid</dt><dd>{{ order['total_amount'] | money }}</dd></div></dl></div>
+  <div class="invoice-note"><strong>Transaction recorded in OLTP.</strong><span>After the next ETL run, each invoice line will be loaded into <code>Fact_Sales</code>.</span></div>
+</section>
+{% endblock %}

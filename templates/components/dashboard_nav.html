@@ -1,0 +1,33 @@
+<aside class="dashboard-sidebar" aria-label="Operations menu">
+  <div class="sidebar-context">
+    <small>Workspace</small>
+    <strong>{% if g.user['role'] == 'admin' %}System Administration{% else %}Procurement & Inventory{% endif %}</strong>
+  </div>
+  <nav>
+    {% if g.user['role'] == 'admin' %}
+      <a class="{% if request.endpoint == 'admin.dashboard' %}active{% endif %}" href="{{ url_for('admin.dashboard') }}">OLTP Overview</a>
+      <a class="{% if request.endpoint in ['admin.products', 'admin.edit_product'] %}active{% endif %}" href="{{ url_for('admin.products') }}">Product Catalog</a>
+      <a class="{% if request.endpoint == 'admin.users' %}active{% endif %}" href="{{ url_for('admin.users') }}">User Accounts</a>
+      <a class="{% if request.endpoint == 'admin.settings' %}active{% endif %}" href="{{ url_for('admin.settings') }}">Warehouses & Suppliers</a>
+      <a class="{% if request.endpoint == 'admin.etl_status' %}active{% endif %}" href="{{ url_for('admin.etl_status') }}">ETL & Data Warehouse</a>
+      <a class="{% if request.endpoint == 'admin.olap' %}active{% endif %}" href="{{ url_for('admin.olap') }}">OLAP Cube & MVs</a>
+      <a class="{% if request.endpoint == 'admin.analytics_dashboard' %}active{% endif %}" href="{{ url_for('admin.analytics_dashboard') }}">Analytics Dashboard</a>
+      <a class="{% if request.blueprint == 'employee' %}active{% endif %}" href="{{ url_for('employee.procurements') }}">Goods Receipts</a>
+    {% else %}
+      <a class="{% if request.endpoint == 'employee.dashboard' %}active{% endif %}" href="{{ url_for('employee.dashboard') }}">Procurement Overview</a>
+      <a class="{% if request.endpoint == 'employee.new_procurement' %}active{% endif %}" href="{{ url_for('employee.new_procurement') }}">Create Goods Receipt</a>
+      <a class="{% if request.endpoint in ['employee.procurements', 'employee.procurement_detail'] %}active{% endif %}" href="{{ url_for('employee.procurements') }}">Receipt History</a>
+    {% endif %}
+  </nav>
+  <div class="sidebar-note">
+    <span class="status-dot"></span>
+    {% if request.endpoint == 'admin.analytics_dashboard' %}
+      <div><strong>DWH decision layer</strong><small>Three-Fact Drill-across</small></div>
+    {% elif request.endpoint == 'admin.olap' %}
+      <div><strong>OLAP precomputed</strong><small>Refreshable aggregates</small></div>
+    {% else %}
+      <div><strong>OLTP operational</strong><small>Real-time transactions</small></div>
+    {% endif %}
+  </div>
+</aside>
+

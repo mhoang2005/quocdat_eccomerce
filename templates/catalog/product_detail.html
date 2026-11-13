@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% from 'components/product_card.html' import product_card %}
+{% from 'components/category_icon.html' import category_svg %}
+{% block title %}{{ product['name'] }} — QuocDat Marketplace{% endblock %}
+{% block content %}
+{% set tone_idx = (product['category_id'] or 0) % 6 %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ url_for('catalog.home') }}">Home</a>
+  <span>/</span>
+  <a href="{{ url_for('catalog.products', category=product['category_id']) }}">{{ product['category_name'] }}</a>
+  <span>/</span>
+  <span aria-current="page">{{ product['product_code'] }}</span>
+</nav>
+<section class="product-detail">
+  <div class="detail-media product-media {% if not product['image_url'] %}is-studio studio-tone-{{ tone_idx }}{% endif %}">
+    <span class="platform-flag platform-{{ product['platform_name']|lower }}">{{ product['platform_name'] }}</span>
+    {% if product['discount_rate'] and product['discount_rate'] >= 1 %}
+      <span class="discount-badge">-{{ product['discount_rate']|int }}%</span>
+    {% endif %}
+    {% if product['image_url'] %}<img src="{{ product['image_url'] }}" alt="{{ product['name'] }}" onerror="this.closest('.product-media').classList.add('is-studio', 'studio-tone-{{ tone_idx }}'); this.remove();">{% endif %}
+    <div class="studio-fallback studio-fallback-lg" aria-hidden="true">
+      <span class="studio-badge-top">{{ product['brand_name'] or product['platform_name'] }}</span>
+      <span class="studio-icon">{{ category_svg(product['category_name']) }}</span>
+      <small>{{ product['category_name'] }} · {{ product['product_code'] }}</small>
+    </div>
+  </div>
+  <div class="detail-copy">
+    <p class="eyebrow">{{ product['category_name'] }} · {{ product['product_code'] }}</p>
+    <h1>{{ product['name'] }}</h1>
+    <div class="detail-rating">
+      {% if product['rating'] and product['rating'] > 0 %}
+        <strong class="star-pill">★ {{ '%.1f'|format(product['rating']) }}</strong>
+        <span>{{ '{:,}'.format(product['review_count'] or 0) }} reviews</span>
+      {% else %}
+        <span class="verified-pill">Curated Marketplace Item</span>
+      {% endif %}
+      <span>{{ '{:,}'.format(product['sold_snapshot'] or 0) }} sold</span>
+    </div>
+    <div class="detail-price"><strong>{{ product['current_price'] | money }}</strong>{% if product['list_price'] and product['list_price'] > product['current_price'] %}<del>{{ product['list_price'] | money }}</del><span>-{{ product['discount_rate']|int }}%</span>{% endif %}</div>
+    <dl class="product-facts"><div><dt>Platform</dt><dd>{{ product['platform_name'] }}</dd></div><div><dt>Brand</dt><dd>{{ product['brand_name'] or 'Verified Seller' }}</dd></div><div><dt>Origin</dt><dd>{{ product['origin'] or 'Domestic / Imported' }}</dd></div><div><dt>Available stock</dt><dd>{{ product['stock_quantity'] }} units</dd></div></dl>
+    {% if g.user and g.user['role'] == 'customer' %}
+      <form class="buy-box" action="{{ url_for('customer.add_to_cart', product_id=product['id']) }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ url_for('customer.cart') }}">
+        <div class="qty-stepper-wrap">
+          <span class="qty-label">Quantity</span>
+          <div class="qty-stepper" data-qty-stepper>
+            <button type="button" data-qty-dec aria-label="Decrease quantity">−</button>
+            <input type="number" name="quantity" value="1" min="1" max="{{ product['stock_quantity'] }}" aria-label="Quantity">
+            <button type="button" data-qty-inc aria-label="Increase quantity">+</button>
+          </div>
+        </div>
+        <button class="button" type="submit" {% if product['stock_quantity'] <= 0 %}disabled{% endif %}>Add to cart</button>
+      </form>
+    {% elif not g.user %}
+      <a class="button" href="{{ url_for('auth.login', next=request.path) }}">Sign in to purchase</a>
+    {% endif %}
+    <div class="detail-guarantees">
+      <span>✓ Free shipping from VND 500,000</span>
+      <span>✓ Real-time OLTP stock sync</span>
+      <span>✓ Instant sales invoice</span>
+    </div>
+  </div>
+</section>
+{% if related %}<section class="section-shell"><div class="section-heading"><div><p class="eyebrow">Same category</p><h2>You may also like</h2></div></div><div class="product-grid">{% for item in related %}{{ product_card(item) }}{% endfor %}</div></section>{% endif %}
+{% endblock %}

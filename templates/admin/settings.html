@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}Warehouses & Suppliers — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">Reference data</p><h1>Warehouses & Suppliers</h1><p>Configure resources used by procurement flows and conformed dimensions.</p></div></header>
+    <div class="settings-grid">
+      <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Dim_Supplier</p><h2>Suppliers</h2></div><span class="count-pill">{{ suppliers|length }}</span></div><div class="entity-list">{% for supplier in suppliers %}<article><div><strong>{{ supplier['name'] }}</strong><small>{{ supplier['supplier_code'] }} · {{ supplier['contact_name'] or 'No contact assigned' }}</small></div><span class="status status-active">active</span></article>{% endfor %}</div>
+        <details class="inline-create"><summary>+ Add supplier</summary><form method="post" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="entity" value="supplier"><label>Code<input name="code" required placeholder="SUP-004"></label><label>Name<input name="name" required></label><label>Contact person<input name="contact_name"></label><label>Phone<input name="phone"></label><label>Email<input type="email" name="email"></label><label>Address<input name="address"></label><button class="button span-2" type="submit">Add supplier</button></form></details>
+      </section>
+      <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Dim_Warehouse</p><h2>Operating Warehouses</h2></div><span class="count-pill">{{ warehouses|length }}</span></div><div class="entity-list">{% for warehouse in warehouses %}<article><div><strong>{{ warehouse['name'] }}</strong><small>{{ warehouse['warehouse_code'] }} · {{ warehouse['address'] }}</small></div><span class="status status-active">active</span></article>{% endfor %}</div>
+        <details class="inline-create"><summary>+ Add warehouse</summary><form method="post" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="entity" value="warehouse"><label>Warehouse code<input name="code" required placeholder="WH-DN"></label><label>Warehouse name<input name="name" required></label><label>Address<input name="address" required></label><button class="button" type="submit">Add warehouse</button></form></details>
+      </section>
+    </div>
+  </section>
+</div>
+{% endblock %}

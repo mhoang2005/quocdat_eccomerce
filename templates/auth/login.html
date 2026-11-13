@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}Sign in — QuocDat Marketplace{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-shell">
+  <div class="auth-story">
+    <p class="eyebrow">Three roles · One system</p>
+    <h1>One sign-in, the right workspace for every role.</h1>
+    <div class="role-list">
+      <div><span>CU</span><p><strong>Customer</strong><small>Shop, pay, and review invoices</small></p></div>
+      <div><span>ST</span><p><strong>Staff</strong><small>Receive stock and update inventory</small></p></div>
+      <div><span>AD</span><p><strong>Admin</strong><small>Manage the system and run ETL</small></p></div>
+    </div>
+  </div>
+  <div class="auth-card">
+    <div><p class="eyebrow">Welcome back</p><h2>Sign in to QuocDat</h2></div>
+    <form method="post" class="form-stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>Email<input type="email" name="email" autocomplete="email" required placeholder="you@example.com"></label>
+      <label>Password<input type="password" name="password" autocomplete="current-password" required placeholder="At least 8 characters"></label>
+      <button class="button button-block" type="submit">Sign in</button>
+    </form>
+    <p class="auth-switch">New customer? <a href="{{ url_for('auth.register') }}">Create an account</a></p>
+    <details class="demo-accounts" open>
+      <summary>Demo accounts</summary>
+      <p><span><strong>Admin:</strong> admin@quocdat.local / Admin@123</span><button type="button" class="demo-fill-btn" data-demo-fill data-email="admin@quocdat.local" data-password="Admin@123">Fill</button></p>
+      <p><span><strong>Staff:</strong> employee@quocdat.local / Staff@123</span><button type="button" class="demo-fill-btn" data-demo-fill data-email="employee@quocdat.local" data-password="Staff@123">Fill</button></p>
+      <p><span><strong>Customer:</strong> customer@quocdat.local / Customer@123</span><button type="button" class="demo-fill-btn" data-demo-fill data-email="customer@quocdat.local" data-password="Customer@123">Fill</button></p>
+    </details>
+  </div>
+</section>
+{% endblock %}
+

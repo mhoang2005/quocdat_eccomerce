@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Procurement & Inventory — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading">
+      <div><p class="eyebrow">Staff operations</p><h1>Procurement & Inventory</h1><p>Track received goods and replenish stock across operating warehouses.</p></div>
+      <a class="button" href="{{ url_for('employee.new_procurement') }}">+ Create receipt</a>
+    </header>
+
+    <div class="metric-grid">
+      <article><span>Received receipts</span><strong>{{ metrics['receipts'] }}</strong><small>Procurement documents</small></article>
+      <article><span>Units received</span><strong>{{ '{:,}'.format(metrics['units_received']) }}</strong><small>Total quantity</small></article>
+      <article class="metric-alert"><span>Stock alerts</span><strong>{{ metrics['low_stock'] }}</strong><small>Locations below threshold</small></article>
+      <article><span>Suppliers</span><strong>{{ metrics['suppliers'] }}</strong><small>Active partners</small></article>
+    </div>
+
+    <div class="dashboard-grid">
+      <section class="panel panel-wide">
+        <div class="panel-heading"><div><p class="eyebrow">Recent activity</p><h2>Latest goods receipts</h2></div><a class="text-link" href="{{ url_for('employee.procurements') }}">View all →</a></div>
+        {% if receipts %}
+        <div class="table-wrap"><table>
+          <thead><tr><th>Receipt</th><th>Supplier</th><th>Warehouse</th><th class="number">Quantity</th><th class="number">Total value</th></tr></thead>
+          <tbody>{% for receipt in receipts %}<tr>
+            <td><a class="table-link" href="{{ url_for('employee.procurement_detail', receipt_id=receipt['id']) }}">{{ receipt['receipt_number'] }}</a><small>{{ receipt['received_at'] | datetime_en }}</small></td>
+            <td>{{ receipt['supplier_name'] }}</td><td>{{ receipt['warehouse_name'] }}</td>
+            <td class="number">{{ receipt['total_units'] }}</td><td class="number"><strong>{{ receipt['total_cost'] | money }}</strong></td>
+          </tr>{% endfor %}</tbody>
+        </table></div>
+        {% else %}<div class="empty-state compact"><strong>No goods receipts yet</strong><p>Create the first receipt to replenish inventory.</p></div>{% endif %}
+      </section>
+
+      <aside class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Needs attention</p><h2>Low stock</h2></div></div>
+        {% if low_stock %}<div class="stock-alert-list">{% for item in low_stock %}
+          <article><div><strong>{{ item['name'] }}</strong><small>{{ item['product_code'] }} · {{ item['warehouse_name'] }}</small></div><span>{{ item['quantity_on_hand'] }}/{{ item['reorder_level'] }}</span></article>
+        {% endfor %}</div>{% else %}<div class="success-state"><span>✓</span><strong>Inventory is healthy</strong><p>No items are below their reorder level.</p></div>{% endif %}
+      </aside>
+    </div>
+  </section>
+</div>
+{% endblock %}

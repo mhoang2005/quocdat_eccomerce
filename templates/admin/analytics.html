@@ -1,0 +1,200 @@
+{% extends 'base.html' %}
+{% block title %}Data Warehouse Analytics — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page analytics-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading analytics-heading">
+      <div>
+        <p class="eyebrow">DWH decision layer</p>
+        <h1>Analytics Dashboard</h1>
+        <p>Cross-process insight from the Kimball facts, conformed dimensions, Materialized Views, and Sales Cube.</p>
+      </div>
+      <div class="analytics-heading-actions">
+        <div class="analytics-refresh-state">
+          <span class="status-dot"></span>
+          <div><small>Latest analytical refresh</small><strong>{{ latest_refresh['completed_at'][:16].replace('T', ' ') if latest_refresh and latest_refresh['completed_at'] else 'Not refreshed' }}</strong></div>
+        </div>
+        <a class="button button-secondary" href="{{ url_for('admin.olap') }}">Open Cube Explorer</a>
+      </div>
+    </header>
+
+    <section class="panel analytics-filter-panel" aria-labelledby="analytics-filter-title">
+      <div class="analytics-filter-heading">
+        <div><p class="eyebrow">Analysis context</p><h2 id="analytics-filter-title">Shared filters</h2></div>
+        <span class="count-pill">{{ active_filter_count }} optional filter{{ '' if active_filter_count == 1 else 's' }}</span>
+      </div>
+      <form method="get" class="analytics-filter-form">
+        <label>Year
+          <select name="year">
+            {% for year in options['years'] %}<option value="{{ year }}" {% if filters['year'] == year %}selected{% endif %}>{{ year }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Month
+          <select name="month"><option value="">All months</option>{% for month in options['months'] %}<option value="{{ month['value'] }}" {% if filters['month'] == month['value'] %}selected{% endif %}>{{ month['label'] }}</option>{% endfor %}</select>
+        </label>
+        <label>Product category
+          <select name="category"><option value="">All categories</option>{% for category in options['categories'] %}<option value="{{ category }}" {% if filters['category'] == category %}selected{% endif %}>{{ category }}</option>{% endfor %}</select>
+        </label>
+        <label>Platform
+          <select name="platform"><option value="">All platforms</option>{% for platform in options['platforms'] %}<option value="{{ platform }}" {% if filters['platform'] == platform %}selected{% endif %}>{{ platform }}</option>{% endfor %}</select>
+        </label>
+        <label>Warehouse
+          <select name="warehouse"><option value="">All warehouses</option>{% for warehouse in options['warehouses'] %}<option value="{{ warehouse }}" {% if filters['warehouse'] == warehouse %}selected{% endif %}>{{ warehouse }}</option>{% endfor %}</select>
+        </label>
+        <div class="analytics-filter-actions"><button class="button" type="submit">Apply filters</button><a class="button button-secondary" href="{{ url_for('admin.analytics_dashboard') }}">Reset</a></div>
+      </form>
+      <div class="analytics-scope-note">
+        <span><strong>Shared:</strong> Year, Month, and Product Category</span>
+        <span><strong>Scoped:</strong> Platform applies to Sales, Inventory, and Marketplace; Warehouse applies to operational facts.</span>
+      </div>
+    </section>
+
+    <section class="analytics-kpi-grid" aria-label="Data Warehouse key performance indicators">
+      <article class="analytics-kpi kpi-revenue">
+        <div><span>Net revenue</span><small>FACT_SALES</small></div>
+        <strong>{{ sales['net_revenue'] | money }}</strong>
+        <p>{{ '{:,}'.format(sales['order_count']) }} order{{ '' if sales['order_count'] == 1 else 's' }} · {{ '{:,}'.format(sales['customer_count']) }} customer{{ '' if sales['customer_count'] == 1 else 's' }}</p>
+      </article>
+      <article class="analytics-kpi">
+        <div><span>Units sold</span><small>FACT_SALES</small></div>
+        <strong>{{ '{:,}'.format(sales['quantity_sold']) }}</strong>
+        <p>{{ sales['discount_amount'] | money }} discounted</p>
+      </article>
+      <article class="analytics-kpi kpi-procurement">
+        <div><span>Procurement spend</span><small>FACT_PROCUREMENT</small></div>
+        <strong>{{ procurement['procurement_cost'] | money }}</strong>
+        <p>{{ '{:,}'.format(procurement['quantity_received']) }} units · {{ procurement['receipt_count'] }} receipt{{ '' if procurement['receipt_count'] == 1 else 's' }}</p>
+      </article>
+      <article class="analytics-kpi kpi-inventory">
+        <div><span>Inventory value</span><small>FACT_INVENTORY</small></div>
+        <strong>{{ inventory['inventory_value'] | money }}</strong>
+        <p>{{ '{:,}'.format(inventory['quantity_on_hand']) }} on hand · {{ inventory['snapshot_date'] or 'No snapshot' }}</p>
+      </article>
+      <article class="analytics-kpi">
+        <div><span>Catalog coverage</span><small>INVENTORY</small></div>
+        <strong>{{ '{:,}'.format(inventory['product_count']) }}</strong>
+        <p>Products represented in latest stock snapshot</p>
+      </article>
+      <article class="analytics-kpi kpi-marketplace">
+        <div><span>Observed demand</span><small>PRODUCT_SNAPSHOT</small></div>
+        <strong>{{ '{:,}'.format(marketplace['sold_quantity_snapshot']) }}</strong>
+        <p>{{ marketplace['average_sale_price'] | money }} avg. · {{ '%.1f'|format(marketplace['average_discount_rate']) }}% discount</p>
+      </article>
+    </section>
+
+    <div class="analytics-overview-grid">
+      <section class="panel analytics-chart-panel">
+        <div class="panel-heading analytics-panel-heading">
+          <div><p class="eyebrow">Commercial flow</p><h2>Revenue vs procurement</h2><p>Daily values from refreshable Materialized Views.</p></div>
+          <div class="chart-legend" aria-label="Chart legend"><span class="legend-sales">Revenue</span><span class="legend-procurement">Procurement</span></div>
+        </div>
+        {% if trend %}
+        <div class="analytics-chart-scroll">
+          <div class="dual-bar-chart" style="--point-count: {{ trend|length }}" role="img" aria-label="Daily net revenue compared with procurement cost">
+            {% for point in trend %}
+            <div class="bar-group">
+              <div class="bar-values">
+                <span class="chart-bar chart-bar-sales" style="--height: {{ point['sales_percent'] }}%" title="{{ point['label'] }} revenue: {{ point['sales'] | money }}"></span>
+                <span class="chart-bar chart-bar-procurement" style="--height: {{ point['procurement_percent'] }}%" title="{{ point['label'] }} procurement: {{ point['procurement'] | money }}"></span>
+              </div>
+              <small>{{ point['short_label'] }}</small>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="chart-footnote"><span>Hover bars for exact values</span><strong>{{ trend|length }} active date{{ '' if trend|length == 1 else 's' }}</strong></div>
+        <div class="commercial-summary">
+          <div><small>Selected net revenue</small><strong>{{ sales['net_revenue'] | money }}</strong></div>
+          <div><small>Selected procurement</small><strong>{{ procurement['procurement_cost'] | money }}</strong></div>
+          <div><small>Movement gap · not profit</small><strong>{{ (sales['net_revenue'] - procurement['procurement_cost']) | money }}</strong></div>
+        </div>
+        {% else %}<div class="empty-state compact"><strong>No commercial movement</strong><p>Adjust the current filters to include sales or procurement activity.</p></div>{% endif %}
+      </section>
+
+      <section class="panel demand-panel">
+        <div class="panel-heading analytics-panel-heading"><div><p class="eyebrow">Marketplace intelligence</p><h2>Category demand</h2><p>Observed sold quantity in product snapshots.</p></div></div>
+        {% if category_demand %}<ol class="ranked-bars">
+          {% for row in category_demand %}<li>
+            <div class="ranked-bar-heading"><span><b>{{ '%02d'|format(loop.index) }}</b>{{ row['category_name'] }}</span><strong>{{ '{:,}'.format(row['demand']) }}</strong></div>
+            <div class="ranked-bar-track"><span style="--bar-width: {{ row['bar_percent'] }}%"></span></div>
+            <small>{{ '%.1f'|format(row['average_discount_rate']) }}% avg. discount · {{ row['average_price'] | money }} average price</small>
+          </li>{% endfor %}
+        </ol>{% else %}<div class="empty-state compact"><strong>No marketplace observations</strong><p>No category snapshots match these filters.</p></div>{% endif %}
+      </section>
+    </div>
+
+    <div class="analytics-comparison-grid">
+      <section class="panel">
+        <div class="panel-heading analytics-panel-heading"><div><p class="eyebrow">Channel benchmark</p><h2>Platform performance</h2><p>Sales outcomes beside marketplace demand signals.</p></div></div>
+        {% if platform_benchmark %}<div class="platform-benchmark-list">
+          {% for row in platform_benchmark %}<article>
+            <div class="platform-benchmark-head"><div><span class="platform-monogram platform-{{ row['platform_name']|lower }}">{{ row['platform_name'][0] }}</span><div><strong>{{ row['platform_name'] }}</strong><small>{{ '{:,}'.format(row['snapshot_count']) }} marketplace observations</small></div></div><strong>{{ row['net_revenue'] | money }}</strong></div>
+            <div class="benchmark-track"><span style="--bar-width: {{ row['bar_percent'] }}%"></span></div>
+            <dl><div><dt>Observed demand</dt><dd>{{ '{:,}'.format(row['observed_demand']) }}</dd></div><div><dt>Average price</dt><dd>{{ row['average_price'] | money }}</dd></div><div><dt>Avg. discount</dt><dd>{{ '%.1f'|format(row['average_discount_rate']) }}%</dd></div></dl>
+          </article>{% endfor %}
+        </div>{% else %}<div class="empty-state compact"><strong>No platform data</strong><p>Adjust the Platform or Product Category filter.</p></div>{% endif %}
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading analytics-panel-heading"><div><p class="eyebrow">Latest stock snapshot</p><h2>Warehouse health</h2><p>Inventory position at the most recent matching date.</p></div></div>
+        {% if warehouse_health %}<div class="warehouse-health-list">
+          {% for row in warehouse_health %}<article>
+            <div><span class="warehouse-index">WH{{ '%02d'|format(loop.index) }}</span><div><strong>{{ row['warehouse_name'] }}</strong><small>{{ row['snapshot_date'] }} · {{ '{:,}'.format(row['product_count']) }} products</small></div></div>
+            <div class="warehouse-value"><strong>{{ row['inventory_value'] | money }}</strong><small>{{ '{:,}'.format(row['quantity_on_hand']) }} units on hand</small></div>
+            <div class="warehouse-health-track"><span style="--bar-width: {{ row['bar_percent'] }}%"></span></div>
+          </article>{% endfor %}
+        </div>{% else %}<div class="empty-state compact"><strong>No inventory snapshot</strong><p>No warehouse inventory matches these filters.</p></div>{% endif %}
+      </section>
+    </div>
+
+    <section class="panel drill-across-panel" id="drill-across">
+      <div class="panel-heading drill-across-heading">
+        <div><p class="eyebrow">Drill-across · three business processes</p><h2>Sales × Procurement × Inventory</h2><p>Each Fact is aggregated independently before alignment on conformed dimensions, preventing many-to-many multiplication.</p></div>
+        <span class="status status-success">DWH query</span>
+      </div>
+
+      <div class="drill-across-map" role="img" aria-label="Fact Sales, Fact Procurement, and Fact Inventory aligned through Date, Product Category, and Warehouse">
+        <div class="drill-source-stack">
+          <div><span>01</span><strong>Fact_Sales</strong><small>Orders · Units · Revenue</small></div>
+          <div><span>02</span><strong>Fact_Procurement</strong><small>Receipts · Units · Cost</small></div>
+          <div><span>03</span><strong>Fact_Inventory</strong><small>Products · On hand · Value</small></div>
+        </div>
+        <div class="drill-map-arrow" aria-hidden="true">→</div>
+        <div class="drill-grain-node"><small>Conformed analytical grain</small><strong>Date × Product Category × Warehouse</strong><span>Aggregate facts → create grain spine → left join measures</span></div>
+      </div>
+
+      <div class="drill-summary-strip">
+        <div><small>Aligned cells</small><strong>{{ '{:,}'.format(drill_summary['aligned_cells']) }}</strong></div>
+        <div><small>Multi-process cells</small><strong>{{ '{:,}'.format(drill_summary['multi_process_cells']) }}</strong></div>
+        <div><small>All three Facts</small><strong>{{ '{:,}'.format(drill_summary['all_three_cells']) }}</strong></div>
+        <div><small>Shared dimensions</small><strong>3</strong></div>
+      </div>
+
+      {% if drill_rows %}<div class="table-wrap drill-across-table-wrap"><table>
+        <thead><tr><th>Conformed grain</th><th>Sales activity</th><th class="number">Net revenue</th><th>Procurement activity</th><th class="number">Procurement cost</th><th>Inventory position</th><th class="number">Inventory value</th><th class="number">Stock / sold</th><th>Signal</th></tr></thead>
+        <tbody>{% for row in drill_rows %}<tr>
+          <td><strong>{{ row['category_name'] }}</strong><small>{{ row['full_date'] }} · {{ row['warehouse_name'] }}</small></td>
+          <td><strong>{{ '{:,}'.format(row['quantity_sold']) }} units</strong><small>{{ row['order_count'] }} order{{ '' if row['order_count'] == 1 else 's' }}</small></td>
+          <td class="number"><strong>{{ row['net_revenue'] | money }}</strong></td>
+          <td><strong>{{ '{:,}'.format(row['quantity_received']) }} units</strong><small>{{ row['receipt_count'] }} receipt{{ '' if row['receipt_count'] == 1 else 's' }}</small></td>
+          <td class="number">{{ row['procurement_cost'] | money }}</td>
+          <td><strong>{{ '{:,}'.format(row['quantity_on_hand']) }} on hand</strong><small>{{ row['product_count'] }} product{{ '' if row['product_count'] == 1 else 's' }}</small></td>
+          <td class="number">{{ row['inventory_value'] | money }}</td>
+          <td class="number">{% if row['coverage_ratio'] is not none %}<strong>{{ '{:,.1f}'.format(row['coverage_ratio']) }}×</strong>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td><span class="drill-signal signal-{{ row['signal_class'] }}">{{ row['signal'] }}</span></td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      <nav class="pagination" aria-label="Drill-across pagination">
+        {% if page > 1 %}<a href="{{ url_for('admin.analytics_dashboard', year=filters['year'], month=filters['month'] or '', category=filters['category'], platform=filters['platform'], warehouse=filters['warehouse'], page=page-1) }}#drill-across">← Previous</a>{% endif %}
+        <span>Page {{ page }} / {{ pages }}</span>
+        {% if page < pages %}<a href="{{ url_for('admin.analytics_dashboard', year=filters['year'], month=filters['month'] or '', category=filters['category'], platform=filters['platform'], warehouse=filters['warehouse'], page=page+1) }}#drill-across">Next →</a>{% endif %}
+      </nav>
+      {% else %}<div class="empty-state"><strong>No aligned analytical cells</strong><p>Adjust Year, Month, Product Category, or Warehouse to widen the Drill-across scope.</p></div>{% endif %}
+
+      <p class="drill-method-note"><strong>Scope rule:</strong> the Platform filter is intentionally excluded from this table because Fact_Procurement has no Platform key. Fact_Product_Snapshot is also kept separate because it has no Warehouse key; it powers the demand and platform panels without being forced into an invalid three-Fact grain.</p>
+    </section>
+  </section>
+</div>
+{% endblock %}

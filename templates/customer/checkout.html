@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Checkout — QuocDat Marketplace{% endblock %}
+{% block content %}
+<div class="checkout-stepper" aria-label="Checkout progress">
+  <span class="step done"><b>✓</b> Shopping Cart</span>
+  <span class="step-line done"></span>
+  <span class="step active"><b>02</b> Shipping &amp; Payment</span>
+  <span class="step-line"></span>
+  <span class="step"><b>03</b> Sales Invoice</span>
+</div>
+<section class="page-heading"><div><p class="eyebrow">Simulated checkout</p><h1>Confirm your order</h1></div><a class="text-link" href="{{ url_for('customer.cart') }}">← Back to cart</a></section>
+<section class="checkout-layout">
+  <form method="post" class="checkout-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-section"><span>01</span><div><h2>Shipping information</h2><div class="form-grid"><label class="span-2">Address<input name="shipping_address" required value="{{ g.user['address'] or '' }}"></label><label>City<input name="shipping_city" required value="{{ g.user['city'] or '' }}"></label><label>Phone number<input name="phone" required value="{{ g.user['phone'] or '' }}"></label></div></div></div>
+    <div class="form-section"><span>02</span><div><h2>Payment method</h2><div class="payment-options"><label><input type="radio" name="payment_method" value="demo_card" checked><span><strong>Demo card</strong><small>Confirmed successfully right away</small></span></label><label><input type="radio" name="payment_method" value="bank_transfer"><span><strong>Simulated bank transfer</strong><small>Generates a transaction reference automatically</small></span></label><label><input type="radio" name="payment_method" value="cod"><span><strong>Cash on delivery</strong><small>The demo still marks the payment as completed</small></span></label></div></div></div>
+    <button class="button button-block" type="submit">Pay {{ total | money }}</button>
+  </form>
+  <aside class="order-summary"><p class="eyebrow">{{ items|length }} products</p>{% for item in items %}<div class="checkout-item"><span>{{ item['quantity'] }}×</span><p>{{ item['name'] }}</p><strong>{{ item['line_total'] | money }}</strong></div>{% endfor %}<dl><div><dt>Subtotal</dt><dd>{{ subtotal | money }}</dd></div><div><dt>Shipping</dt><dd>{{ shipping_fee | money }}</dd></div><div class="summary-total"><dt>Total</dt><dd>{{ total | money }}</dd></div></dl></aside>
+</section>
+{% endblock %}

@@ -1,0 +1,79 @@
+{% from 'components/category_icon.html' import category_svg %}
+{% macro product_card(product) %}
+{% set tone_idx = (product['category_id'] or 0) % 6 %}
+<article class="product-card"
+  data-platform="{{ product['platform_name']|lower }}"
+  data-product-id="{{ product['id'] }}"
+  data-product-name="{{ product['name'] }}"
+  data-product-code="{{ product['product_code'] }}"
+  data-product-category="{{ product['category_name'] }}"
+  data-product-platform="{{ product['platform_name'] }}"
+  data-product-price="{{ product['current_price'] | money }}"
+  data-product-list-price="{% if product['list_price'] and product['list_price'] > product['current_price'] %}{{ product['list_price'] | money }}{% endif %}"
+  data-product-discount="{% if product['discount_rate'] and product['discount_rate'] >= 1 %}{{ product['discount_rate']|int }}{% endif %}"
+  data-product-rating="{{ '%.1f'|format(product['rating'] or 0) }}"
+  data-product-reviews="{{ product['review_count'] or 0 }}"
+  data-product-sold="{{ '{:,}'.format(product['sold_snapshot'] or 0) }}"
+  data-product-stock="{{ product['stock_quantity'] }}"
+  data-product-image="{{ product['image_url'] or '' }}"
+  data-product-url="{{ url_for('catalog.product_detail', product_id=product['id']) }}">
+  <div class="product-media-wrap">
+    <a class="product-media {% if not product['image_url'] %}is-studio studio-tone-{{ tone_idx }}{% endif %}" href="{{ url_for('catalog.product_detail', product_id=product['id']) }}">
+      <span class="platform-flag platform-{{ product['platform_name']|lower }}">{{ product['platform_name'] }}</span>
+      {% if product['discount_rate'] and product['discount_rate'] >= 1 %}
+        <span class="discount-badge">-{{ product['discount_rate']|int }}%</span>
+      {% endif %}
+      {% if product['image_url'] %}
+        <img src="{{ product['image_url'] }}" alt="{{ product['name'] }}" loading="lazy" onerror="this.closest('.product-media').classList.add('is-studio', 'studio-tone-{{ tone_idx }}'); this.remove();">
+      {% endif %}
+      <div class="studio-fallback" aria-hidden="true">
+        <span class="studio-badge-top">{{ product['brand_name'] or product['platform_name'] }}</span>
+        <span class="studio-icon">{{ category_svg(product['category_name']) }}</span>
+        <small>{{ product['category_name'] }}</small>
+      </div>
+    </a>
+    <div class="card-hover-bar">
+      <button type="button" class="quick-view-btn" data-quick-view>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+        Quick View
+      </button>
+    </div>
+  </div>
+  <div class="product-card-body">
+    <p class="product-cat">{{ product['category_name'] }}</p>
+    <h3><a href="{{ url_for('catalog.product_detail', product_id=product['id']) }}">{{ product['name'] }}</a></h3>
+    <div class="rating-row">
+      {% if product['rating'] and product['rating'] > 0 %}
+        <span class="star-pill">★ {{ '%.1f'|format(product['rating']) }}</span>
+        <span>({{ '{:,}'.format(product['review_count'] or 0) }})</span>
+      {% else %}
+        <span class="verified-pill">Curated</span>
+      {% endif %}
+      {% if product['sold_snapshot'] %}
+        <span>· {{ '{:,}'.format(product['sold_snapshot']) }} sold</span>
+      {% endif %}
+    </div>
+    <div class="price-row">
+      <strong>{{ product['current_price'] | money }}</strong>
+      {% if product['list_price'] and product['list_price'] > product['current_price'] %}
+        <del>{{ product['list_price'] | money }}</del>
+      {% endif %}
+    </div>
+    <div class="product-card-footer">
+      <small class="stock-pill {% if product['stock_quantity'] <= 0 %}out{% endif %}">
+        {% if product['stock_quantity'] > 0 %}{{ product['stock_quantity'] }} in stock{% else %}Out of stock{% endif %}
+      </small>
+      {% if g.user and g.user['role'] == 'customer' and product['stock_quantity'] > 0 %}
+        <form action="{{ url_for('customer.add_to_cart', product_id=product['id']) }}" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="quantity" value="1">
+          <input type="hidden" name="next" value="{{ request.full_path }}">
+          <button class="icon-action" type="submit" aria-label="Add {{ product['name'] }} to cart" title="Add to cart">+</button>
+        </form>
+      {% else %}
+        <a class="icon-action" href="{{ url_for('catalog.product_detail', product_id=product['id']) }}" aria-label="View product" title="View details">→</a>
+      {% endif %}
+    </div>
+  </div>
+</article>
+{% endmacro %}

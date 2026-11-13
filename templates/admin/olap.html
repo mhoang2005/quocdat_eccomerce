@@ -1,0 +1,164 @@
+{% extends 'base.html' %}
+{% block title %}OLAP Cube & Materialized Views — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading">
+      <div>
+        <p class="eyebrow">Precomputed analytical layer</p>
+        <h1>OLAP Cube & Materialized Views</h1>
+        <p>Complete-refresh aggregates on top of the Kimball star schema. Continue to the Analytics Dashboard for charts and Drill-across.</p>
+      </div>
+      <form action="{{ url_for('admin.refresh_olap_data') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="button" type="submit">Refresh OLAP Layer</button>
+      </form>
+    </header>
+
+    <div class="metric-grid metric-grid-five olap-metrics">
+      <article><span>Materialized Views</span><strong>4</strong><small>Physical aggregate tables</small></article>
+      <article><span>Materialized rows</span><strong>{{ '{:,}'.format(status['materialized_rows']) }}</strong><small>Across four processes</small></article>
+      <article><span>Sales Cube rows</span><strong>{{ '{:,}'.format(status['cube_rows']) }}</strong><small>Precomputed cells</small></article>
+      <article><span>Time hierarchy</span><strong>5</strong><small>Day → Month → Quarter → Year → All</small></article>
+      <article><span>Grouping sets</span><strong>16</strong><small>2⁴ combinations per time level</small></article>
+    </div>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Complete-refresh MVs</p><h2>Materialized Views</h2></div>
+        {% if status['latest'] %}<small>Last refresh {{ status['latest']['completed_at'] | datetime_en }}</small>{% endif %}
+      </div>
+      <div class="olap-mv-grid">
+        {% for view in materialized_views %}
+          <article class="olap-mv-card">
+            <div><span>{{ '%02d'|format(loop.index) }}</span><small>{{ view['source'] }}</small></div>
+            <h3>{{ view['label'] }}</h3>
+            <code>{{ view['table'] }}</code>
+            <p>{{ view['grain'] }}</p>
+            <strong>{{ '{:,}'.format(view['row_count']) }} row{% if view['row_count'] != 1 %}s{% endif %}</strong>
+          </article>
+        {% endfor %}
+      </div>
+      <p class="olap-note"><strong>SQLite note:</strong> native materialized views are unavailable, so these are indexed physical aggregate tables refreshed transactionally after every ETL run.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Course-aligned five-dimensional Sales Cube</p><h2>Cube Explorer</h2></div>
+        <div class="cube-legend"><span>Time</span><span>Product</span><span>Customer</span><span>Location</span><span>Store/Seller</span></div>
+      </div>
+
+      {% if grand_total %}
+        <div class="cube-total-strip">
+          <div><small>All-time orders</small><strong>{{ '{:,}'.format(grand_total['order_count']) }}</strong></div>
+          <div><small>Units sold</small><strong>{{ '{:,}'.format(grand_total['quantity_sold']) }}</strong></div>
+          <div><small>Gross revenue</small><strong>{{ grand_total['gross_revenue'] | money }}</strong></div>
+          <div><small>Net revenue</small><strong>{{ grand_total['net_revenue'] | money }}</strong></div>
+        </div>
+      {% endif %}
+
+      <div class="cube-operation-bar" aria-label="Roll-up and Drill-down controls">
+        <div><small>Current time member level</small><strong>{{ selected_level|title }}</strong></div>
+        <div class="cube-operation-actions">
+          {% if rollup_level %}<a class="button button-small button-secondary" href="{{ url_for('admin.olap', level=rollup_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], customer=dimensions['customer_name']['selected'], city=dimensions['customer_city']['selected'], pivot=pivot_mode) }}">↑ Roll up to {{ rollup_level|title }}</a>{% else %}<span class="button button-small button-secondary disabled" aria-disabled="true">Highest level</span>{% endif %}
+          {% if drilldown_level %}<a class="button button-small button-secondary" href="{{ url_for('admin.olap', level=drilldown_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], customer=dimensions['customer_name']['selected'], city=dimensions['customer_city']['selected'], pivot=pivot_mode) }}">↓ Drill down to {{ drilldown_level|title }}</a>{% else %}<span class="button button-small button-secondary disabled" aria-disabled="true">Lowest level</span>{% endif %}
+        </div>
+      </div>
+
+      <form method="get" class="cube-filter-form" aria-label="Cube slice and dice controls">
+        <input type="hidden" name="pivot" value="{{ pivot_mode }}">
+        <label>Time level
+          <select name="level">
+            {% for level in ['DAY', 'MONTH', 'QUARTER', 'YEAR', 'ALL'] %}
+              <option value="{{ level }}" {% if selected_level == level %}selected{% endif %}>{{ level|title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Store/Seller slice
+          <select name="platform">
+            <option value="">Any cube member</option>
+            <option value="ALL" {% if dimensions['platform_name']['selected'] == 'ALL' %}selected{% endif %}>ALL (rolled up)</option>
+            {% for member in dimensions['platform_name']['members'] %}<option value="{{ member }}" {% if dimensions['platform_name']['selected'] == member %}selected{% endif %}>{{ member }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Product dice
+          <select name="category">
+            <option value="" {% if not dimensions['category_name']['selected'] %}selected{% endif %}>Any cube member</option>
+            <option value="ALL" {% if dimensions['category_name']['selected'] == 'ALL' %}selected{% endif %}>ALL (rolled up)</option>
+            {% for member in dimensions['category_name']['members'] %}<option value="{{ member }}" {% if dimensions['category_name']['selected'] == member %}selected{% endif %}>{{ member }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Customer dice
+          <select name="customer">
+            <option value="">Any cube member</option>
+            <option value="ALL" {% if dimensions['customer_name']['selected'] == 'ALL' %}selected{% endif %}>ALL (rolled up)</option>
+            {% for member in dimensions['customer_name']['members'] %}<option value="{{ member }}" {% if dimensions['customer_name']['selected'] == member %}selected{% endif %}>{{ member }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Location dice
+          <select name="city">
+            <option value="">Any cube member</option>
+            <option value="ALL" {% if dimensions['customer_city']['selected'] == 'ALL' %}selected{% endif %}>ALL (rolled up)</option>
+            {% for member in dimensions['customer_city']['members'] %}<option value="{{ member }}" {% if dimensions['customer_city']['selected'] == member %}selected{% endif %}>{{ member }}</option>{% endfor %}
+          </select>
+        </label>
+        <button class="button" type="submit">Apply Slice / Dice</button>
+      </form>
+
+      <div class="table-wrap cube-table-wrap">
+        <table>
+          <thead><tr><th>Time member</th><th>Store/Seller</th><th>Product</th><th>Customer</th><th>Location</th><th class="number">Orders</th><th class="number">Units</th><th class="number">Net revenue</th><th>Mask</th></tr></thead>
+          <tbody>
+            {% for row in cube_rows %}
+              <tr>
+                <td><strong>{{ row['time_label'] }}</strong><small>{{ row['time_level'] }}</small></td>
+                <td>{{ row['platform_name'] }}</td>
+                <td>{{ row['category_name'] }}</td>
+                <td>{{ row['customer_name'] }}</td>
+                <td>{{ row['customer_city'] }}</td>
+                <td class="number">{{ row['order_count'] }}</td>
+                <td class="number">{{ row['quantity_sold'] }}</td>
+                <td class="number"><strong>{{ row['net_revenue'] | money }}</strong></td>
+                <td><code>{{ row['grouping_mask'] }}</code></td>
+              </tr>
+            {% else %}
+              <tr><td colspan="9"><div class="empty-state"><strong>No cube cells match this slice.</strong><span>Change a member filter or refresh the OLAP layer.</span></div></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="olap-note">Dimension mapping: Product = category, Store/Seller = marketplace platform, Location = customer city. Grouping mask: bit 1 = Store/Seller ALL, bit 2 = Product ALL, bit 4 = Customer ALL, bit 8 = Location ALL. Time hierarchy is represented by <code>time_level</code>.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Pivot operation</p><h2>Pivot View</h2><p>Rotate one analytical dimension against the current Time level while all other dimensions are rolled up.</p></div>
+        <nav class="filter-tabs" aria-label="Pivot orientation">
+          {% for mode, label in [('product', 'Product × Time'), ('location', 'Location × Time'), ('seller', 'Store/Seller × Time')] %}
+            <a class="{% if pivot_mode == mode %}active{% endif %}" href="{{ url_for('admin.olap', level=selected_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], customer=dimensions['customer_name']['selected'], city=dimensions['customer_city']['selected'], pivot=mode) }}">{{ label }}</a>
+          {% endfor %}
+        </nav>
+      </div>
+      <div class="table-wrap pivot-table-wrap">
+        <table>
+          <thead><tr><th>{{ pivot_config['member_label'] }}</th>{% for column in pivot_columns %}<th class="number">{{ column['label'] }}</th>{% endfor %}<th class="number">Total</th></tr></thead>
+          <tbody>
+            {% for row in pivot_rows %}<tr><td><strong>{{ row['member'] }}</strong></td>{% for value in row['values'] %}<td class="number">{{ value | money }}</td>{% endfor %}<td class="number"><strong>{{ row['total'] | money }}</strong></td></tr>
+            {% else %}<tr><td colspan="{{ pivot_columns|length + 2 }}">No data is available for this pivot orientation and time level.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Refresh lineage</p><h2>OLAP refresh history</h2></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Refresh ID</th><th>Source ETL</th><th>Type</th><th>Started</th><th class="number">MV rows</th><th class="number">Cube rows</th><th>Status</th></tr></thead><tbody>
+        {% for run in refresh_runs %}<tr><td><code>{{ run['refresh_id'] }}</code></td><td><code>{{ run['source_etl_run_id'] or 'MANUAL' }}</code></td><td>{{ run['refresh_type'] }}</td><td>{{ run['started_at'] | datetime_en }}</td><td class="number">{{ '{:,}'.format(run['materialized_rows']) }}</td><td class="number">{{ '{:,}'.format(run['cube_rows']) }}</td><td><span class="status status-{{ run['status']|lower }}">{{ run['status'] }}</span></td></tr>
+        {% else %}<tr><td colspan="7">No OLAP refresh has run yet.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+  </section>
+</div>
+{% endblock %}

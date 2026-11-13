@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}My Orders — QuocDat Marketplace{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">Customer account</p><h1>Orders & invoices</h1></div><a class="button button-small" href="{{ url_for('catalog.products') }}">Shop more products</a></section>
+{% if orders %}<div class="order-list">{% for order in orders %}<a class="order-row" href="{{ url_for('customer.order_detail', order_id=order['id']) }}"><div><small>{{ order['created_at'] | datetime_en }}</small><strong>{{ order['order_number'] }}</strong><span>{{ order['invoice_number'] }}</span></div><div><span>{{ order['item_count'] }} product lines</span><strong>{{ order['total_amount'] | money }}</strong></div><span class="status status-{{ order['status'] }}">{{ order['status'] }}</span><b aria-hidden="true">→</b></a>{% endfor %}</div>{% else %}<div class="empty-state"><strong>No orders yet</strong><p>Your first order and invoice will appear here.</p><a class="button" href="{{ url_for('catalog.products') }}">Explore products</a></div>{% endif %}
+{% endblock %}
+

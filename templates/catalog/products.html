@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% from 'components/product_card.html' import product_card %}
+{% block title %}Products — QuocDat Marketplace{% endblock %}
+{% block content %}
+<section class="catalog-header">
+  <div>
+    <p class="eyebrow">Integrated catalog</p>
+    <h1>{{ '{:,}'.format(total) }} products</h1>
+  </div>
+  <div class="catalog-quick-pills" aria-label="Quick platform filter">
+    <a class="chip-link {% if not platform_id %}active{% endif %}" href="{{ url_for('catalog.products', q=query, category=category_id, sort=sort) }}">All platforms</a>
+    {% for platform in platforms %}
+      <a class="chip-link {% if platform_id == platform['id'] %}active{% endif %}" href="{{ url_for('catalog.products', q=query, category=category_id, platform=platform['id'], sort=sort) }}">{{ platform['name'] }}</a>
+    {% endfor %}
+  </div>
+</section>
+<section class="catalog-layout">
+  <aside class="filter-panel">
+    <form method="get">
+      <label>Search products<input type="search" name="q" value="{{ query }}" placeholder="Name, code, or brand"></label>
+      <label>Platform<select name="platform"><option value="">All platforms</option>{% for platform in platforms %}<option value="{{ platform['id'] }}" {% if platform_id == platform['id'] %}selected{% endif %}>{{ platform['name'] }}</option>{% endfor %}</select></label>
+      <label>Category<select name="category"><option value="">All categories</option>{% for category in categories %}<option value="{{ category['id'] }}" {% if category_id == category['id'] %}selected{% endif %}>{{ category['name'] }}</option>{% endfor %}</select></label>
+      <label>Sort by<select name="sort"><option value="popular" {% if sort == 'popular' %}selected{% endif %}>Most popular</option><option value="price_asc" {% if sort == 'price_asc' %}selected{% endif %}>Price: low to high</option><option value="price_desc" {% if sort == 'price_desc' %}selected{% endif %}>Price: high to low</option><option value="rating" {% if sort == 'rating' %}selected{% endif %}>Highest rated</option><option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest in system</option></select></label>
+      <button class="button button-block" type="submit">Apply filters</button>
+      <a class="filter-reset" href="{{ url_for('catalog.products') }}">Clear filters</a>
+    </form>
+  </aside>
+  <div>
+    {% if query or category_id or platform_id %}
+    <div class="active-filters">
+      {% if query %}<span class="filter-chip">Keyword: <strong>{{ query }}</strong></span>{% endif %}
+      {% if platform_id %}{% for p in platforms if p['id'] == platform_id %}<span class="filter-chip">Platform: <strong>{{ p['name'] }}</strong></span>{% endfor %}{% endif %}
+      {% if category_id %}{% for c in categories if c['id'] == category_id %}<span class="filter-chip">Category: <strong>{{ c['name'] }}</strong></span>{% endfor %}{% endif %}
+      <a class="text-link" href="{{ url_for('catalog.products') }}">Reset all</a>
+    </div>
+    {% endif %}
+    {% if products %}
+      <div class="product-grid product-grid-catalog">{% for product in products %}{{ product_card(product) }}{% endfor %}</div>
+      <nav class="pagination" aria-label="Pagination">
+        {% if page > 1 %}<a href="{{ url_for('catalog.products', q=query, category=category_id, platform=platform_id, sort=sort, page=page-1) }}">← Previous</a>{% endif %}
+        <span>Page {{ page }} / {{ pages }}</span>
+        {% if page < pages %}<a href="{{ url_for('catalog.products', q=query, category=category_id, platform=platform_id, sort=sort, page=page+1) }}">Next →</a>{% endif %}
+      </nav>
+    {% else %}
+      <div class="empty-state"><strong>No products found</strong><p>Try another keyword or filter.</p><a class="button" href="{{ url_for('catalog.products') }}">View all products</a></div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

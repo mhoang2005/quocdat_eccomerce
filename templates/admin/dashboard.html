@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}System Administration — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">Operations center</p><h1>OLTP Overview</h1><p>Source transaction status before data moves through Staging and into the DWH.</p></div><a class="button" href="{{ url_for('admin.etl_status') }}">Open ETL Center</a></header>
+    <div class="metric-grid metric-grid-five">
+      <article><span>Products</span><strong>{{ '{:,}'.format(metrics['products']) }}</strong><small>Active catalog</small></article>
+      <article><span>Customers</span><strong>{{ metrics['customers'] }}</strong><small>Active accounts</small></article>
+      <article><span>Orders</span><strong>{{ metrics['orders'] }}</strong><small>System-wide</small></article>
+      <article><span>Revenue</span><strong>{{ metrics['revenue'] | money }}</strong><small>Paid orders</small></article>
+      <article class="metric-alert"><span>Low stock</span><strong>{{ metrics['low_stock'] }}</strong><small>Needs attention</small></article>
+    </div>
+    <div class="dashboard-grid">
+      <section class="panel panel-wide"><div class="panel-heading"><div><p class="eyebrow">Latest cash flow</p><h2>Orders & invoices</h2></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Invoice</th><th>Status</th><th class="number">Total</th></tr></thead><tbody>{% for order in recent_orders %}<tr><td><strong>{{ order['order_number'] }}</strong><small>{{ order['created_at'] | datetime_en }}</small></td><td>{{ order['full_name'] }}</td><td>{{ order['invoice_number'] }}</td><td><span class="status status-{{ order['status'] }}">{{ order['status'] }}</span></td><td class="number"><strong>{{ order['total_amount'] | money }}</strong></td></tr>{% endfor %}</tbody></table></div>
+      </section>
+      <aside class="panel"><div class="panel-heading"><div><p class="eyebrow">Audit trail</p><h2>Activity log</h2></div></div><div class="activity-list">{% for event in recent_audit %}<article><span></span><div><strong>{{ event['action'] }} · {{ event['entity_type'] }}</strong><p>{{ event['details'] }}</p><small>{{ event['full_name'] or 'System' }} · {{ event['created_at'] | datetime_en }}</small></div></article>{% else %}<p class="muted">No activity yet.</p>{% endfor %}</div></aside>
+    </div>
+  </section>
+</div>
+{% endblock %}

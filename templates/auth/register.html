@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Create customer account — QuocDat Marketplace{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-shell auth-register">
+  <div class="auth-story">
+    <p class="eyebrow">Customer account</p>
+    <h1>Create an account and start shopping.</h1>
+    <p>This profile is stored in OLTP and becomes part of <code>Dim_Customer</code> after the next ETL run.</p>
+  </div>
+  <div class="auth-card auth-card-wide">
+    <div><p class="eyebrow">Free registration</p><h2>Your information</h2></div>
+    <form method="post" class="form-grid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="span-2">Full name<input name="full_name" required autocomplete="name"></label>
+      <label>Email<input type="email" name="email" required autocomplete="email"></label>
+      <label>Phone number<input name="phone" required autocomplete="tel"></label>
+      <label>City<input name="city" required autocomplete="address-level2"></label>
+      <label>Address<input name="address" required autocomplete="street-address"></label>
+      <label>Password<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+      <label>Confirm password<input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
+      <button class="button span-2" type="submit">Create customer account</button>
+    </form>
+    <p class="auth-switch">Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
+  </div>
+</section>
+{% endblock %}

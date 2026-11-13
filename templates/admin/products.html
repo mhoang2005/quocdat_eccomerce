@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Product Management — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">Master data</p><h1>Product Catalog</h1><p>{{ '{:,}'.format(total) }} current products from Lazada and Tiki.</p></div></header>
+    <form class="toolbar" method="get"><label class="search-field"><span class="sr-only">Search products</span><input type="search" name="q" value="{{ query }}" placeholder="Search by code or product name"><button type="submit">Search</button></label>{% if query %}<a class="text-link" href="{{ url_for('admin.products') }}">Clear search</a>{% endif %}</form>
+    <section class="panel">
+      <div class="table-wrap"><table><thead><tr><th>Product</th><th>Platform</th><th>Category</th><th class="number">Sale price</th><th class="number">Stock</th><th>Status</th><th></th></tr></thead><tbody>{% for product in products %}<tr><td><strong>{{ product['name'] }}</strong><small>{{ product['product_code'] }}</small></td><td>{{ product['platform_name'] }}</td><td>{{ product['category_name'] }}</td><td class="number">{{ product['current_price'] | money }}</td><td class="number">{{ product['stock_quantity'] }}</td><td><span class="status {% if product['is_active'] %}status-active{% else %}status-inactive{% endif %}">{% if product['is_active'] %}active{% else %}inactive{% endif %}</span></td><td class="number"><a class="table-link" href="{{ url_for('admin.edit_product', product_id=product['id']) }}">Edit →</a></td></tr>{% endfor %}</tbody></table></div>
+      <nav class="pagination" aria-label="Pagination">{% if page > 1 %}<a href="{{ url_for('admin.products', q=query, page=page-1) }}">← Previous</a>{% endif %}<span>Page {{ page }} / {{ pages }}</span>{% if page < pages %}<a href="{{ url_for('admin.products', q=query, page=page+1) }}">Next →</a>{% endif %}</nav>
+    </section>
+  </section>
+</div>
+{% endblock %}

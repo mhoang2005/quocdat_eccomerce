@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}{{ receipt['receipt_number'] }} — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">Recorded goods receipt</p><h1>{{ receipt['receipt_number'] }}</h1><p>{{ receipt['received_at'] | datetime_en }} · {{ receipt['employee_name'] }}</p></div><span class="status status-{{ receipt['status'] }}">{{ receipt['status'] }}</span></header>
+    <section class="document-card">
+      <div class="document-meta"><div><small>Supplier</small><strong>{{ receipt['supplier_name'] }}</strong><span>{{ receipt['supplier_code'] }}</span></div><div><small>Receiving warehouse</small><strong>{{ receipt['warehouse_name'] }}</strong><span>{{ receipt['warehouse_code'] }}</span></div><div><small>Notes</small><strong>{{ receipt['notes'] or 'No notes' }}</strong></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Product</th><th>Code</th><th class="number">Quantity</th><th class="number">Unit cost</th><th class="number">Line total</th></tr></thead><tbody>{% for line in lines %}<tr><td><strong>{{ line['name'] }}</strong></td><td><code>{{ line['product_code'] }}</code></td><td class="number">{{ line['quantity'] }}</td><td class="number">{{ line['unit_cost'] | money }}</td><td class="number"><strong>{{ line['line_total'] | money }}</strong></td></tr>{% endfor %}</tbody></table></div>
+      <div class="document-total"><span>Receipt total</span><strong>{{ receipt['total_cost'] | money }}</strong></div>
+      <div class="invoice-note"><strong>Inventory was updated in real time.</strong><span>After ETL, these lines load into <code>Fact_Procurement</code>; ending stock loads into <code>Fact_Inventory</code>.</span></div>
+    </section>
+  </section>
+</div>
+{% endblock %}

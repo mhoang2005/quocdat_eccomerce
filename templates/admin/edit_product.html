@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Edit {{ product['product_code'] }} — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">{{ product['product_code'] }}</p><h1>Edit Product</h1><p>Changing descriptive attributes creates a new SCD Type 2 version during the next ETL run.</p></div><a class="text-link" href="{{ url_for('admin.products') }}">← Product catalog</a></header>
+    <div class="edit-layout">
+      <form method="post" class="panel form-panel">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+          <label class="span-2">Product name<input name="name" required value="{{ product['name'] }}"></label>
+          <label>Category<select name="category_id" required>{% for category in categories %}<option value="{{ category['id'] }}" {% if category['id'] == product['category_id'] %}selected{% endif %}>{{ category['name'] }}</option>{% endfor %}</select></label>
+          <label>Brand<input name="brand_name" value="{{ product['brand_name'] or '' }}"></label>
+          <label>Sale price<input type="number" min="0" step="100" name="current_price" required value="{{ product['current_price'] }}"></label>
+          <label>List price<input type="number" min="0" step="100" name="list_price" value="{{ product['list_price'] or product['current_price'] }}"></label>
+          <label>Origin<input name="origin" value="{{ product['origin'] or '' }}"></label>
+          <label>Status<select name="is_active"><option value="1" {% if product['is_active'] %}selected{% endif %}>On sale</option><option value="0" {% if not product['is_active'] %}selected{% endif %}>Discontinued</option></select></label>
+        </div>
+        <div class="form-actions"><a class="button button-secondary" href="{{ url_for('admin.products') }}">Cancel</a><button class="button" type="submit">Save changes</button></div>
+      </form>
+      <aside class="panel"><div class="panel-heading"><div><p class="eyebrow">OLTP inventory</p><h2>By warehouse</h2></div></div><div class="inventory-list">{% for stock in inventory %}<article><div><strong>{{ stock['warehouse_name'] }}</strong><small>Average cost {{ stock['average_cost'] | money }}</small></div><span>{{ stock['quantity_on_hand'] }}</span></article>{% else %}<p class="muted">No inventory recorded.</p>{% endfor %}</div><div class="scd-callout"><span>SCD2</span><p>Previous values are never overwritten in the DWH. The old version closes its <code>valid_to</code>; the new version receives <code>is_current = 1</code>.</p></div></aside>
+    </div>
+  </section>
+</div>
+{% endblock %}

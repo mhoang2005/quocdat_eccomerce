@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}ETL & Data Warehouse — QuocDat Marketplace{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+{% block content %}
+<div class="dashboard-shell">
+  {% include 'components/dashboard_nav.html' %}
+  <section class="dashboard-main">
+    <header class="dashboard-heading"><div><p class="eyebrow">Kimball pipeline</p><h1>ETL & Data Warehouse</h1><p>Track data from Raw and Staging into the star schema, then run loads on demand.</p></div><form action="{{ url_for('admin.execute_etl') }}" method="post" class="etl-run-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><select name="mode" aria-label="ETL mode"><option value="incremental">Incremental</option><option value="full">Full reload</option></select><button class="button" type="submit">Run ETL</button></form></header>
+
+    <ol class="pipeline-map pipeline-map-six" aria-label="Data pipeline"><li><span>01</span><div><strong>Raw Sources</strong><small>Lazada · Tiki · OLTP</small></div></li><li><span>02</span><div><strong>Staging + DQ</strong><small>Standardize · deduplicate</small></div></li><li><span>03</span><div><strong>Dimensions</strong><small>Conformed · SCD Type 2</small></div></li><li><span>04</span><div><strong>Facts</strong><small>Sales · Procurement · Inventory · Snapshot</small></div></li><li><span>05</span><div><strong>Materialized Views</strong><small>Four complete-refresh aggregates</small></div></li><li><span>06</span><div><strong>Sales Cube</strong><small>Roll-up · Slice · Dice</small></div></li></ol>
+
+    <div class="warehouse-counts">
+      {% for table, count in counts.items() %}<article class="{% if table.startswith('fact_') %}fact-count{% endif %}"><small>{{ table }}</small><strong>{{ '{:,}'.format(count) }}</strong><span>{% if table.startswith('fact_') %}Fact{% else %}Dimension{% endif %}</span></article>{% endfor %}
+    </div>
+
+    <div class="dashboard-grid">
+      <section class="panel panel-wide"><div class="panel-heading"><div><p class="eyebrow">Processing history</p><h2>ETL runs</h2></div></div><div class="table-wrap"><table><thead><tr><th>Run ID</th><th>Mode</th><th>Started</th><th class="number">Staging</th><th class="number">Dimension</th><th class="number">Fact</th><th>Status</th></tr></thead><tbody>{% for run in runs %}<tr><td><code>{{ run['run_id'] }}</code></td><td>{{ run['mode'] }}</td><td>{{ run['started_at'] | datetime_en }}</td><td class="number">{{ run['staged_rows'] }}</td><td class="number">{{ run['dimension_rows'] }}</td><td class="number">{{ run['fact_rows'] }}</td><td><span class="status status-{{ run['status']|lower }}">{{ run['status'] }}</span></td></tr>{% endfor %}</tbody></table></div></section>
+      <aside class="panel"><div class="panel-heading"><div><p class="eyebrow">Data quality</p><h2>Raw snapshots</h2></div></div><div class="dq-list">{% for row in dq %}<article><div><span class="dq-dot dq-{{ row['dq_status']|lower }}"></span><strong>{{ row['dq_status'] }}</strong></div><span>{{ '{:,}'.format(row['row_count']) }} rows</span><small>{{ row['duplicate_count'] or 0 }} duplicate records</small></article>{% endfor %}</div><div class="deferred-note"><strong>Analytical layer completed</strong><p>Materialized Views and the Sales Cube refresh after ETL; the Dashboard and three-Fact Drill-across read the refreshed DWH.</p><a class="text-link" href="{{ url_for('admin.analytics_dashboard') }}">Open Analytics Dashboard →</a></div></aside>
+    </div>
+    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Lineage</p><h2>Latest batches</h2></div></div><div class="batch-list">{% for batch in batches %}<article><div><strong>{{ batch['batch_id'] }}</strong><small>{{ batch['batch_type'] }} · {{ batch['source_started_at'] | datetime_en }}</small></div><div><span>{{ '{:,}'.format(batch['source_row_count']) }} source rows</span><span class="status status-{{ batch['status']|lower }}">{{ batch['status'] }}</span></div></article>{% endfor %}</div></section>
+  </section>
+</div>
+{% endblock %}
