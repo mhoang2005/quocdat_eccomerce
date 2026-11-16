@@ -10,7 +10,9 @@ import click
 from flask import current_app
 
 from app.db import execute_script, get_db
-from app.services.analytics import refresh_olap
+from app.services.analytics import ensure_olap_schema, refresh_olap
+from app.services.bootstrap import install_oltp_features
+from app.services.sales_cdc import ensure_sales_fact_order_key, remove_stale_sales, stage_sales
 
 
 FAR_FUTURE = "9999-12-31T23:59:59"
@@ -56,12 +58,11 @@ def _ensure_date(connection, value: str) -> int:
     return key
 
 
-def _stage_oltp(batch_id: str, snapshot_at: str) -> dict:
+def _stage_oltp(batch_id: str, snapshot_at: str, full: bool):
     oltp = get_db("oltp")
     staging = get_db("staging")
     for table in (
         "stg_customer",
-        "stg_sales_line",
         "stg_procurement_line",
         "stg_inventory_snapshot",
     ):
@@ -83,31 +84,8 @@ def _stage_oltp(batch_id: str, snapshot_at: str) -> dict:
         [tuple(row) + (batch_id,) for row in customers],
     )
 
-    sales = oltp.execute(
-        """
-        SELECT oi.id, o.id, o.order_number, inv.invoice_number, o.created_at,
-               o.customer_id, oi.product_id, p.natural_key, pl.name,
-               oi.warehouse_id, oi.quantity, oi.unit_price, oi.discount_amount,
-               oi.quantity * oi.unit_price AS gross_amount, oi.line_total AS net_amount
-        FROM order_items oi
-        JOIN orders o ON o.id = oi.order_id
-        JOIN invoices inv ON inv.order_id = o.id
-        JOIN products p ON p.id = oi.product_id
-        JOIN platforms pl ON pl.id = p.platform_id
-        WHERE o.payment_status = 'paid' AND o.status != 'cancelled'
-        """
-    ).fetchall()
-    staging.executemany(
-        """
-        INSERT INTO stg_sales_line(
-            source_order_item_id, source_order_id, order_number, invoice_number,
-            order_at, customer_id, product_id, product_nk, platform_name,
-            warehouse_id, quantity, unit_price, discount_amount, gross_amount,
-            net_amount, batch_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [tuple(row) + (batch_id,) for row in sales],
-    )
+    sales_cdc, changed_orders = stage_sales(oltp, staging, batch_id, full)
+    sales = sales_cdc["staged"]
 
     procurement = oltp.execute(
         """
@@ -168,6 +146,11 @@ def _stage_oltp(batch_id: str, snapshot_at: str) -> dict:
         JOIN platforms pl ON pl.id = p.platform_id
         """
     ).fetchall()
+    staged_hashes = {
+        row[0] for row in staging.execute(
+            "SELECT record_hash FROM stg_product_snapshot WHERE source_system = 'OLTP'"
+        )
+    }
     product_snapshots = 0
     for row in products:
         payload = dict(row)
@@ -181,11 +164,7 @@ def _stage_oltp(batch_id: str, snapshot_at: str) -> dict:
             row["is_active"],
             row["updated_at"],
         )
-        exists = staging.execute(
-            "SELECT 1 FROM stg_product_snapshot WHERE source_system = 'OLTP' AND record_hash = ?",
-            (record_hash,),
-        ).fetchone()
-        if exists:
+        if record_hash in staged_hashes:
             continue
         staging.execute(
             """
@@ -220,48 +199,42 @@ def _stage_oltp(batch_id: str, snapshot_at: str) -> dict:
                 json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             ),
         )
+        staged_hashes.add(record_hash)
         product_snapshots += 1
 
-    total_rows = len(customers) + len(sales) + len(procurement) + len(inventory) + product_snapshots
+    total_rows = len(customers) + sales + len(procurement) + len(inventory) + product_snapshots
+    counts = {
+        "customers": len(customers),
+        "sales": sales,
+        "procurement": len(procurement),
+        "inventory": len(inventory),
+        "product_snapshots": product_snapshots,
+        "total": total_rows,
+        "sales_cdc": sales_cdc,
+    }
     staging.execute(
         """
         INSERT OR REPLACE INTO etl_batch(
             batch_id, batch_type, status, source_started_at, completed_at,
             source_row_count, valid_row_count, warning_row_count,
             invalid_row_count, message
-        ) VALUES (?, 'OLTP_INCREMENTAL', 'SUCCESS', ?, ?, ?, ?, 0, 0, ?)
+        ) VALUES (?, ?, 'SUCCESS', ?, ?, ?, ?, 0, 0, ?)
         """,
         (
             batch_id,
+            "OLTP_FULL" if full else "OLTP_INCREMENTAL",
             snapshot_at,
             _now(),
             total_rows,
             total_rows,
-            json.dumps(
-                {
-                    "customers": len(customers),
-                    "sales": len(sales),
-                    "procurement": len(procurement),
-                    "inventory": len(inventory),
-                    "new_product_snapshots": product_snapshots,
-                }
-            ),
+            json.dumps(counts),
         ),
     )
-    staging.commit()
-    return {
-        "customers": len(customers),
-        "sales": len(sales),
-        "procurement": len(procurement),
-        "inventory": len(inventory),
-        "product_snapshots": product_snapshots,
-        "total": total_rows,
-    }
+    return counts, changed_orders
 
 
-def _clear_dwh() -> None:
+def _clear_dwh(run_id: str) -> None:
     connection = get_db("dwh")
-    connection.execute("PRAGMA foreign_keys = OFF")
     for table in (
         "cube_sales",
         "mv_sales_daily",
@@ -279,12 +252,10 @@ def _clear_dwh() -> None:
         "dim_platform",
         "dim_product",
         "dim_date",
-        "etl_run",
     ):
         connection.execute(f"DELETE FROM {table}")
     connection.execute("DELETE FROM sqlite_sequence")
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.commit()
+    connection.execute("DELETE FROM etl_run WHERE run_id != ?", (run_id,))
 
 
 def _load_static_dimensions() -> int:
@@ -381,7 +352,6 @@ def _load_static_dimensions() -> int:
         )
         affected += 1
 
-    dwh.commit()
     return affected
 
 
@@ -472,7 +442,6 @@ def _load_product_dimension() -> int:
             attribute_hash=attr_hash,
         )
         affected += 1
-    dwh.commit()
     return affected
 
 
@@ -493,10 +462,19 @@ def _product_key_at(versions: dict[str, list[dict]], natural_key: str, timestamp
     return candidates[-1]["product_key"] if candidates else None
 
 
-def _load_facts(snapshot_at: str) -> int:
+def _load_facts(batch_id: str) -> int:
     staging = get_db("staging")
     dwh = get_db("dwh")
     versions = _product_versions()
+    known_dates = {row[0] for row in dwh.execute("SELECT date_key FROM dim_date")}
+
+    def date_key_for(value):
+        key = _date_key(value)
+        if key not in known_dates:
+            _ensure_date(dwh, value)
+            known_dates.add(key)
+        return key
+
     platform_map = {
         row["platform_name"]: row["platform_key"] for row in dwh.execute("SELECT * FROM dim_platform")
     }
@@ -510,6 +488,9 @@ def _load_facts(snapshot_at: str) -> int:
         row["warehouse_nk"]: row["warehouse_key"] for row in dwh.execute("SELECT * FROM dim_warehouse")
     }
     affected = 0
+    loaded_snapshots = {
+        tuple(row) for row in dwh.execute("SELECT source_record_hash, snapshot_at FROM fact_product_snapshot")
+    }
 
     for row in staging.execute(
         """
@@ -518,11 +499,14 @@ def _load_facts(snapshot_at: str) -> int:
         ORDER BY id
         """
     ):
+        snapshot_identity = (row["record_hash"], row["snapshot_at"])
+        if snapshot_identity in loaded_snapshots:
+            continue
         product_key = _product_key_at(versions, row["natural_key"], row["snapshot_at"])
         platform_name = row["source_system"]
         if not product_key or platform_name not in platform_map:
             continue
-        date_key = _ensure_date(dwh, row["snapshot_at"])
+        date_key = date_key_for(row["snapshot_at"])
         cursor = dwh.execute(
             """
             INSERT OR IGNORE INTO fact_product_snapshot(
@@ -546,20 +530,36 @@ def _load_facts(snapshot_at: str) -> int:
                 row["review_count"],
             ),
         )
+        loaded_snapshots.add(snapshot_identity)
         affected += max(cursor.rowcount, 0)
 
-    for row in staging.execute("SELECT * FROM stg_sales_line"):
+    for row in staging.execute("SELECT * FROM stg_sales_line WHERE batch_id = ?", (batch_id,)):
         product_key = _product_key_at(versions, row["product_nk"], row["order_at"])
         if not product_key:
-            continue
-        date_key = _ensure_date(dwh, row["order_at"])
+            raise RuntimeError(f"Missing product dimension for sales line {row['source_order_item_id']}")
+        date_key = date_key_for(row["order_at"])
         cursor = dwh.execute(
             """
-            INSERT OR IGNORE INTO fact_sales(
+            INSERT INTO fact_sales(
                 date_key, product_key, customer_key, platform_key, warehouse_key,
                 source_order_item_id, order_number, invoice_number, quantity,
-                unit_price, discount_amount, gross_amount, net_amount
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                unit_price, discount_amount, gross_amount, net_amount, source_order_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_order_item_id) DO UPDATE SET
+                date_key = excluded.date_key,
+                product_key = excluded.product_key,
+                customer_key = excluded.customer_key,
+                platform_key = excluded.platform_key,
+                warehouse_key = excluded.warehouse_key,
+                order_number = excluded.order_number,
+                invoice_number = excluded.invoice_number,
+                quantity = excluded.quantity,
+                unit_price = excluded.unit_price,
+                discount_amount = excluded.discount_amount,
+                gross_amount = excluded.gross_amount,
+                net_amount = excluded.net_amount,
+                source_order_id = excluded.source_order_id,
+                loaded_at = CURRENT_TIMESTAMP
             """,
             (
                 date_key,
@@ -575,6 +575,7 @@ def _load_facts(snapshot_at: str) -> int:
                 row["discount_amount"],
                 row["gross_amount"],
                 row["net_amount"],
+                row["source_order_id"],
             ),
         )
         affected += max(cursor.rowcount, 0)
@@ -583,7 +584,7 @@ def _load_facts(snapshot_at: str) -> int:
         product_key = _product_key_at(versions, row["product_nk"], row["received_at"])
         if not product_key:
             continue
-        date_key = _ensure_date(dwh, row["received_at"])
+        date_key = date_key_for(row["received_at"])
         cursor = dwh.execute(
             """
             INSERT OR IGNORE INTO fact_procurement(
@@ -610,7 +611,7 @@ def _load_facts(snapshot_at: str) -> int:
         product_key = _product_key_at(versions, row["product_nk"], row["snapshot_at"])
         if not product_key:
             continue
-        date_key = _ensure_date(dwh, row["snapshot_at"])
+        date_key = date_key_for(row["snapshot_at"])
         dwh.execute(
             """
             INSERT INTO fact_inventory(
@@ -636,37 +637,52 @@ def _load_facts(snapshot_at: str) -> int:
         )
         affected += 1
 
-    dwh.commit()
     return affected
 
 
 def run_etl(mode: str = "incremental") -> dict:
     if mode not in {"incremental", "full"}:
         raise ValueError("ETL mode must be incremental or full")
-    execute_script("dwh", "dwh_schema.sql")
-    if mode == "full":
-        _clear_dwh()
-
+    install_oltp_features()
+    execute_script("staging", "staging_schema.sql")
+    ensure_olap_schema()
+    staging = get_db("staging")
+    oltp = get_db("oltp")
     dwh = get_db("dwh")
     run_id = "ETL-" + uuid.uuid4().hex[:12].upper()
+    staging.execute("BEGIN IMMEDIATE")
     started_at = _now()
-    dwh.execute(
-        "INSERT INTO etl_run(run_id, mode, status, started_at) VALUES (?, ?, 'RUNNING', ?)",
-        (run_id, mode, started_at),
-    )
-    dwh.commit()
     try:
-        staged = _stage_oltp(run_id, started_at)
-        dimension_rows = _load_static_dimensions() + _load_product_dimension()
-        fact_rows = _load_facts(started_at)
-        analytics = refresh_olap(source_etl_run_id=run_id)
-        warning_rows = get_db("staging").execute(
+        dwh.execute(
+            "INSERT INTO etl_run(run_id, mode, status, started_at) VALUES (?, ?, 'RUNNING', ?)",
+            (run_id, mode, started_at),
+        )
+        dwh.commit()
+        dwh.execute("BEGIN IMMEDIATE")
+        ensure_sales_fact_order_key(dwh)
+        if mode == "full":
+            _clear_dwh(run_id)
+        oltp.execute("BEGIN")
+        try:
+            staged, changed_orders = _stage_oltp(run_id, started_at, mode == "full")
+            dimension_rows = _load_static_dimensions() + _load_product_dimension()
+        finally:
+            oltp.rollback()
+        sales_cdc = staged["sales_cdc"]
+        sales_cdc["removed_facts"] = remove_stale_sales(
+            dwh, staging, run_id, sales_cdc["mode"] == "baseline", changed_orders
+        )
+        fact_rows = _load_facts(run_id)
+        analytics = refresh_olap(source_etl_run_id=run_id, within_etl=True)
+        snapshot_partitions_refreshed = analytics["snapshot_partitions_refreshed"]
+        warning_rows = staging.execute(
             "SELECT COUNT(*) AS n FROM stg_product_snapshot WHERE dq_status = 'WARNING'"
         ).fetchone()["n"]
         completed_at = _now()
         message = json.dumps(
             {
                 "staging": staged,
+                "snapshot_partitions_refreshed": snapshot_partitions_refreshed,
                 "olap": {
                     "refresh_id": analytics["refresh_id"],
                     "materialized_rows": analytics["materialized_rows"],
@@ -685,6 +701,7 @@ def run_etl(mode: str = "incremental") -> dict:
             (completed_at, staged["total"], dimension_rows, fact_rows, warning_rows, message, run_id),
         )
         dwh.commit()
+        staging.commit()
         return {
             "run_id": run_id,
             "status": "SUCCESS",
@@ -693,9 +710,12 @@ def run_etl(mode: str = "incremental") -> dict:
             "dimension_rows": dimension_rows,
             "fact_rows": fact_rows,
             "warning_rows": warning_rows,
+            "sales_cdc": sales_cdc,
+            "snapshot_partitions_refreshed": snapshot_partitions_refreshed,
             "olap": analytics,
         }
     except Exception as exc:
+        staging.rollback()
         dwh.rollback()
         dwh.execute(
             "UPDATE etl_run SET status = 'FAILED', completed_at = ?, message = ? WHERE run_id = ?",

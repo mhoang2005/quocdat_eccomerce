@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import click
+from flask import current_app
 
-from app.db import execute_script, get_db
+from app.db import execute_script, get_db, sqlserver_enabled, table_exists
+
+from .snapshot_partitions import refresh_snapshot_months
 
 
 MATERIALIZED_VIEWS = {
@@ -39,18 +43,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
-def _ensure_olap_schema() -> None:
+def ensure_olap_schema() -> None:
     """Apply the DDL and replace obsolete derived Cube schemas when required."""
-    execute_script("dwh", "dwh_schema.sql")
+    if sqlserver_enabled():
+        if not table_exists("dwh", "cube_sales"):
+            execute_script("dwh", "dwh_schema.sql")
+            execute_script("dwh", "ssas_source.sql")
+        return
     connection = get_db("dwh")
     cube_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(cube_sales)")
     }
-    required_columns = {"customer_name", "customer_city"}
-    if cube_columns and not required_columns.issubset(cube_columns):
+    if "customer_name" in cube_columns or (cube_columns and "customer_city" not in cube_columns):
         connection.execute("DROP TABLE cube_sales")
         connection.commit()
-        execute_script("dwh", "dwh_schema.sql")
+    execute_script("dwh", "dwh_schema.sql")
+
+
+_ensure_olap_schema = ensure_olap_schema
 
 
 MV_REFRESH_SQL = {
@@ -222,22 +232,20 @@ TIME_ROLLUPS = (
 
 
 def _refresh_sales_cube(connection, refreshed_at: str) -> int:
-    """Build all time roll-ups and all 2^4 course-aligned grouping sets."""
+    """Build all time roll-ups and all 2^3 course-aligned grouping sets."""
     connection.execute("DELETE FROM cube_sales")
+    if getattr(connection, "dialect", None) == "sqlserver":
+        query = Path(current_app.config["PROJECT_ROOT"]) / "sql" / "sqlserver" / "refresh_sales_cube.sql"
+        connection.execute(query.read_text(encoding="utf-8"), (refreshed_at,))
+        return connection.execute("SELECT COUNT(*) AS n FROM cube_sales").fetchone()["n"]
     for time_rollup in TIME_ROLLUPS:
-        for grouping_mask in range(16):
+        for grouping_mask in range(8):
             platform_all = bool(grouping_mask & 1)
             category_all = bool(grouping_mask & 2)
-            customer_all = bool(grouping_mask & 4)
-            location_all = bool(grouping_mask & 8)
+            location_all = bool(grouping_mask & 4)
 
             platform_expr = "'ALL'" if platform_all else "p.platform_name"
             category_expr = "'ALL'" if category_all else "pr.category_name"
-            customer_expr = (
-                "'ALL'"
-                if customer_all
-                else "c.full_name || ' · ' || c.email"
-            )
             location_expr = (
                 "'ALL'"
                 if location_all
@@ -249,8 +257,6 @@ def _refresh_sales_cube(connection, refreshed_at: str) -> int:
                 group_by.append("p.platform_name")
             if not category_all:
                 group_by.append("pr.category_name")
-            if not customer_all:
-                group_by.extend(("c.full_name", "c.email"))
             if not location_all:
                 group_by.append("COALESCE(NULLIF(TRIM(c.city), ''), 'Unknown')")
             group_clause = " GROUP BY " + ", ".join(group_by) if group_by else ""
@@ -260,7 +266,7 @@ def _refresh_sales_cube(connection, refreshed_at: str) -> int:
                 INSERT INTO cube_sales(
                     time_level, time_key, time_label, date_key, year_number,
                     quarter_number, month_number, platform_name, category_name,
-                    customer_name, customer_city, grouping_mask, order_count, customer_count,
+                    customer_city, grouping_mask, order_count, customer_count,
                     line_count, quantity_sold, gross_revenue, discount_amount,
                     net_revenue, average_selling_price, refreshed_at
                 )
@@ -268,7 +274,7 @@ def _refresh_sales_cube(connection, refreshed_at: str) -> int:
                        {time_rollup['label']}, {time_rollup['date_key']},
                        {time_rollup['year']}, {time_rollup['quarter']},
                        {time_rollup['month']}, {platform_expr}, {category_expr},
-                       {customer_expr}, {location_expr}, {grouping_mask},
+                       {location_expr}, {grouping_mask},
                        COUNT(DISTINCT f.order_number),
                        COUNT(DISTINCT f.customer_key),
                        COUNT(*),
@@ -291,9 +297,10 @@ def _refresh_sales_cube(connection, refreshed_at: str) -> int:
     return connection.execute("SELECT COUNT(*) AS n FROM cube_sales").fetchone()["n"]
 
 
-def refresh_olap(source_etl_run_id: str | None = None) -> dict:
+def refresh_olap(source_etl_run_id: str | None = None, *, within_etl: bool = False) -> dict:
     """Complete-refresh all physical MVs and the Sales Cube."""
-    _ensure_olap_schema()
+    if not within_etl:
+        ensure_olap_schema()
     connection = get_db("dwh")
     refresh_id = "OLAP-" + uuid.uuid4().hex[:12].upper()
     started_at = _now()
@@ -305,11 +312,14 @@ def refresh_olap(source_etl_run_id: str | None = None) -> dict:
         """,
         (refresh_id, source_etl_run_id, started_at),
     )
-    connection.commit()
+    if not within_etl:
+        connection.commit()
 
     try:
         refreshed_at = _now()
-        connection.execute("BEGIN IMMEDIATE")
+        if not within_etl:
+            connection.execute("BEGIN IMMEDIATE")
+        snapshot_partitions_refreshed = refresh_snapshot_months(connection)
         mv_counts: dict[str, int] = {}
         for table_name, statement in MV_REFRESH_SQL.items():
             connection.execute(f"DELETE FROM {table_name}")
@@ -324,11 +334,12 @@ def refresh_olap(source_etl_run_id: str | None = None) -> dict:
         message = json.dumps(
             {
                 "materialized_views": mv_counts,
+                "snapshot_partitions_refreshed": snapshot_partitions_refreshed,
                 "cube": {
                     "table": "cube_sales",
                     "rows": cube_rows,
                     "time_levels": [rollup["level"] for rollup in TIME_ROLLUPS],
-                    "grouping_sets_per_level": 16,
+                    "grouping_sets_per_level": 8,
                 },
             },
             ensure_ascii=False,
@@ -343,17 +354,21 @@ def refresh_olap(source_etl_run_id: str | None = None) -> dict:
             """,
             (completed_at, materialized_rows, cube_rows, message, refresh_id),
         )
-        connection.commit()
+        if not within_etl:
+            connection.commit()
         return {
             "refresh_id": refresh_id,
             "status": "SUCCESS",
             "source_etl_run_id": source_etl_run_id,
             "materialized_views": mv_counts,
             "materialized_rows": materialized_rows,
+            "snapshot_partitions_refreshed": snapshot_partitions_refreshed,
             "cube_rows": cube_rows,
             "completed_at": completed_at,
         }
     except Exception as exc:
+        if within_etl:
+            raise
         connection.rollback()
         connection.execute(
             """
@@ -368,7 +383,7 @@ def refresh_olap(source_etl_run_id: str | None = None) -> dict:
 
 
 def olap_status() -> dict:
-    _ensure_olap_schema()
+    ensure_olap_schema()
     connection = get_db("dwh")
     counts = {
         table_name: connection.execute(

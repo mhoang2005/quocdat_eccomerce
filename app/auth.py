@@ -5,7 +5,7 @@ from urllib.parse import urljoin, urlparse
 from flask import Blueprint, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .db import get_db
+from .db import get_db, sqlserver_enabled
 
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -114,6 +114,16 @@ def load_logged_in_user() -> None:
         if g.user is None or not g.user["is_active"]:
             session.clear()
             g.user = None
+    if sqlserver_enabled():
+        database = get_db()
+        database.execute(
+            "EXEC sys.sp_set_session_context @key=N'qd_role', @value=?",
+            (g.user["role"] if g.user else "anonymous",),
+        )
+        database.execute(
+            "EXEC sys.sp_set_session_context @key=N'qd_user', @value=?",
+            (g.user["id"] if g.user else 0,),
+        )
 
 
 def cart_count() -> int:

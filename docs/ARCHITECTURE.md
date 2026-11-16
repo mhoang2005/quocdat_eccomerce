@@ -7,7 +7,9 @@ flowchart LR
     A[Raw Lazada] --> S[Staging + DQ]
     B[Raw Tiki] --> S
     W[Three-role web app] --> O[(OLTP)]
-    O --> S
+    O -->|Other operational loads| S
+    O -->|Order, line, and invoice changes| J[Sales CDC log]
+    J --> S
     S --> E[Full / incremental ETL]
     E --> D[(Kimball DWH)]
     D --> M[Materialized Views]
@@ -46,13 +48,13 @@ Changes to product name, category, brand, origin, or active status are preserved
 
 ## 3. Three isolated databases
 
-| File | Purpose | Characteristics |
+| SQL Server database | Purpose | Characteristics |
 |---|---|---|
-| `instance/oltp.db` | Web operations | Normalized schema, transactions, foreign keys, current state |
-| `instance/staging.db` | Data integration | Shared schema, DQ, duplicate flags, batch lineage |
-| `instance/dwh.db` | Analytics | Star schema, surrogate keys, history, physical MVs, Sales Cube |
+| `QuocDatOLTP` | Web operations | Normalized schema, transactions, foreign keys, source change events |
+| `QuocDatStaging` | Data integration | Shared schema, DQ, duplicate flags, CDC checkpoint, batch lineage |
+| `QuocDatDWH` | Analytics | Star schema, surrogate keys, partitioned snapshot fact, physical aggregates |
 
-SQLite provides a zero-configuration demo. The separation between the three layers remains explicit, so PostgreSQL or SQL Server can replace SQLite without changing the business model.
+On this workstation the databases use SQL Server `.\SQL`. The Sales cube in SSAS Multidimensional reads the warehouse views and can be opened in Visual Studio. The web Cube Explorer queries the warehouse's `cube_sales` table. See the [setup and deployment guide](./SQL_SERVER.md).
 
 ## 4. Staging and Data Quality
 
@@ -66,6 +68,8 @@ Lazada and Tiki records are standardized into `stg_product_snapshot`:
 - Assign `dq_status` as `VALID`, `WARNING`, or `INVALID`, with a diagnostic message.
 
 OLTP data is staged into customer, sales-line, procurement-line, and inventory-snapshot areas. Every run records a `batch_id`, status, row counts, and timestamps.
+
+Sales CDC reads the event high-water mark and affected orders from one OLTP read snapshot. Staging retains unchanged sales lines and serializes ETL runs. The warehouse commits facts, snapshot partitions, and OLAP together, then Staging commits the checkpoint. A repeated batch reconciles by source order and order-line IDs. On the first run, ETL reconciles the full sales baseline and populates those source IDs in existing warehouse rows.
 
 ## 5. Kimball model
 
@@ -110,7 +114,7 @@ ETL calculates an `attribute_hash` from descriptive product attributes. When the
 
 ## 7. Materialized Views and Sales Cube
 
-SQLite does not implement native Materialized Views, so the project uses indexed physical aggregate tables with the same complete-refresh behavior.
+The application uses indexed physical aggregate tables and refreshes them together after each ETL. The SQL Server refresh uses T-SQL `CUBE` to populate the web explorer's summary table.
 
 ### Materialized View grains
 
@@ -121,18 +125,17 @@ SQLite does not implement native Materialized Views, so the project uses indexed
 | `mv_inventory_daily` | `Fact_Inventory` | Date × Platform × Category × Warehouse | products, units on hand, inventory value |
 | `mv_marketplace_daily` | `Fact_Product_Snapshot` | Date × Platform × Category | products, snapshots, prices, discount, rating, reviews, sold snapshot |
 
-### Course-aligned five-dimensional Sales Cube
+### Course-aligned four-dimensional Sales Cube
 
-`cube_sales` follows the course model **Time × Product × Customer × Location × Store/Seller** using the available conformed data:
+`cube_sales` follows the course model **Time × Product × Location × Store/Seller** using the available conformed data. To prevent cube explosion caused by high-cardinality customer identities, individual customer profiles remain in `Fact_Sales` and are aggregated into the metric `customer_count` rather than a dimension attribute in the Cube:
 
 - Time hierarchy: `DAY → MONTH → QUARTER → YEAR → ALL`.
 - Product is represented by `Dim_Product.category_name`.
-- Customer is represented by the unique `Dim_Customer` member.
 - Location is represented by `Dim_Customer.city`.
 - Store/Seller is represented by `Dim_Platform`, the available marketplace sales channel; the raw sources do not provide a reliable seller master.
-- For each time level, the four non-time dimensions generate all `2⁴ = 16` detailed/`ALL` grouping sets.
-- `grouping_mask` uses bit 1 for Store/Seller `ALL`, bit 2 for Product `ALL`, bit 4 for Customer `ALL`, and bit 8 for Location `ALL`.
-- Measures: distinct orders, distinct customers, line count, units, gross revenue, discount, net revenue, and average selling price.
+- For each time level, the three non-time dimensions generate all `2³ = 8` detailed/`ALL` grouping sets.
+- `grouping_mask` uses bit 1 for Store/Seller `ALL`, bit 2 for Product `ALL`, and bit 4 for Location `ALL`.
+- Measures: distinct orders, distinct customers (`customer_count`), line count, units, gross revenue, discount, net revenue, and average selling price.
 - Roll-up and Drill-down move through the Time hierarchy; Slice and Dice filter cube members without rescanning `Fact_Sales`.
 - Pivot rotates the table between Product × Time, Location × Time, and Store/Seller × Time views.
 

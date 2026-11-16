@@ -10,6 +10,18 @@ from flask import abort, g, redirect, request, session, url_for
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
 
+def mask_email(email: str) -> str:
+    local, separator, domain = email.rpartition("@")
+    prefix = local[0] if len(local) > 1 else ""
+    return f"{prefix}***@{domain}" if separator and local and domain else "***"
+
+
+def mask_phone(phone: str | None) -> str | None:
+    if not phone:
+        return None
+    return "******" + (phone[-4:] if len(phone) > 4 else "")
+
+
 def csrf_token() -> str:
     token = session.get("_csrf_token")
     if not token:

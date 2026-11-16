@@ -6,7 +6,13 @@ from pathlib import Path
 from flask import Flask, render_template
 
 from . import admin, auth, catalog, customer, db, employee, security
-from .services import analytics, bootstrap, etl
+from .services import analytics, bootstrap, etl, sqlserver_migration
+
+
+LOCAL_SQLSERVER = (
+    r"DRIVER={ODBC Driver 18 for SQL Server};SERVER=.\SQL;Trusted_Connection=yes;"
+    "Encrypt=yes;TrustServerCertificate=yes;LongAsMax=yes"
+)
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -25,6 +31,13 @@ def create_app(test_config: dict | None = None) -> Flask:
         STAGING_DATABASE=project_root / "instance" / "staging.db",
         DWH_DATABASE=project_root / "instance" / "dwh.db",
         PRODUCTS_PER_PAGE=24,
+        SQLSERVER_CONNECTION=(
+            "" if os.environ.get("QUOCDAT_DB_BACKEND", "sqlserver").lower() == "sqlite"
+            else os.environ.get("QUOCDAT_SQLSERVER", LOCAL_SQLSERVER)
+        ),
+        SQLSERVER_OLTP=os.environ.get("QUOCDAT_SQLSERVER_OLTP", "QuocDatOLTP"),
+        SQLSERVER_STAGING=os.environ.get("QUOCDAT_SQLSERVER_STAGING", "QuocDatStaging"),
+        SQLSERVER_DWH=os.environ.get("QUOCDAT_SQLSERVER_DWH", "QuocDatDWH"),
     )
 
     if test_config:
@@ -39,6 +52,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     bootstrap.init_app(app)
     etl.init_app(app)
     analytics.init_app(app)
+    sqlserver_migration.init_app(app)
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(catalog.bp)

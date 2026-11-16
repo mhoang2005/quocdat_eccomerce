@@ -98,6 +98,14 @@ CREATE TABLE IF NOT EXISTS stg_procurement_line (
     batch_id TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_stg_sales_order ON stg_sales_line(source_order_id);
+CREATE INDEX IF NOT EXISTS idx_stg_sales_batch ON stg_sales_line(batch_id);
+
+CREATE TABLE IF NOT EXISTS cdc_checkpoint (
+    stream TEXT PRIMARY KEY,
+    event_id INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS stg_inventory_snapshot (
     product_id INTEGER NOT NULL,
     product_nk TEXT NOT NULL,

@@ -16,6 +16,7 @@ def app(tmp_path_factory):
         {
             "TESTING": True,
             "SECRET_KEY": "test-secret",
+            "SQLSERVER_CONNECTION": "",
             "INSTANCE_DIR": instance_dir,
             "OLTP_DATABASE": instance_dir / "oltp.db",
             "STAGING_DATABASE": instance_dir / "staging.db",

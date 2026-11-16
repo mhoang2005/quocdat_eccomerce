@@ -13,6 +13,22 @@
       {% for table, count in counts.items() %}<article class="{% if table.startswith('fact_') %}fact-count{% endif %}"><small>{{ table }}</small><strong>{{ '{:,}'.format(count) }}</strong><span>{% if table.startswith('fact_') %}Fact{% else %}Dimension{% endif %}</span></article>{% endfor %}
     </div>
 
+    <section class="panel">
+      <div class="panel-heading"><h2>Sales change data capture</h2></div>
+      <p>Checkpoint {{ checkpoint if checkpoint is not none else 'Awaiting baseline' }} · {{ pending_events }} pending events · {{ ready_months }} marketplace months ready</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ETL run</th><th>Load</th><th>Events</th><th>Orders</th><th>Staged sales lines</th><th>Removed sales facts</th></tr></thead>
+        <tbody>
+        {% for run in runs if run['sales_cdc'] %}
+          {% set cdc = run['sales_cdc'] %}
+          <tr><td>{{ run['run_id'] }}</td><td>{{ cdc['mode'] }}</td><td>{{ cdc['events'] }}</td><td>{{ cdc['orders'] }}</td><td>{{ cdc['staged'] }}</td><td>{{ cdc['removed_facts'] }}</td></tr>
+        {% else %}
+          <tr><td colspan="6">Run ETL to load the sales baseline.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
     <div class="dashboard-grid">
       <section class="panel panel-wide"><div class="panel-heading"><div><p class="eyebrow">Processing history</p><h2>ETL runs</h2></div></div><div class="table-wrap"><table><thead><tr><th>Run ID</th><th>Mode</th><th>Started</th><th class="number">Staging</th><th class="number">Dimension</th><th class="number">Fact</th><th>Status</th></tr></thead><tbody>{% for run in runs %}<tr><td><code>{{ run['run_id'] }}</code></td><td>{{ run['mode'] }}</td><td>{{ run['started_at'] | datetime_en }}</td><td class="number">{{ run['staged_rows'] }}</td><td class="number">{{ run['dimension_rows'] }}</td><td class="number">{{ run['fact_rows'] }}</td><td><span class="status status-{{ run['status']|lower }}">{{ run['status'] }}</span></td></tr>{% endfor %}</tbody></table></div></section>
       <aside class="panel"><div class="panel-heading"><div><p class="eyebrow">Data quality</p><h2>Raw snapshots</h2></div></div><div class="dq-list">{% for row in dq %}<article><div><span class="dq-dot dq-{{ row['dq_status']|lower }}"></span><strong>{{ row['dq_status'] }}</strong></div><span>{{ '{:,}'.format(row['row_count']) }} rows</span><small>{{ row['duplicate_count'] or 0 }} duplicate records</small></article>{% endfor %}</div><div class="deferred-note"><strong>Analytical layer completed</strong><p>Materialized Views and the Sales Cube refresh after ETL; the Dashboard and three-Fact Drill-across read the refreshed DWH.</p><a class="text-link" href="{{ url_for('admin.analytics_dashboard') }}">Open Analytics Dashboard →</a></div></aside>

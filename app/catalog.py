@@ -13,11 +13,12 @@ bp = Blueprint("catalog", __name__)
 
 PRODUCT_SELECT = """
     SELECT p.*, c.name AS category_name, pl.name AS platform_name,
-           COALESCE(SUM(i.quantity_on_hand), 0) AS stock_quantity
+           COALESCE(i.stock, 0) AS stock_quantity
     FROM products p
     JOIN categories c ON c.id = p.category_id
     JOIN platforms pl ON pl.id = p.platform_id
-    LEFT JOIN inventory i ON i.product_id = p.id
+    LEFT JOIN (SELECT product_id, SUM(quantity_on_hand) AS stock FROM inventory GROUP BY product_id) i
+      ON i.product_id = p.id
 """
 
 
@@ -26,13 +27,13 @@ def home():
     database = get_db()
     featured = database.execute(
         PRODUCT_SELECT
-        + " WHERE p.is_active = 1 GROUP BY p.id HAVING stock_quantity > 0 ORDER BY p.rating DESC, p.sold_snapshot DESC LIMIT 8"
+        + " WHERE p.is_active = 1 AND i.stock > 0 ORDER BY p.rating DESC, p.sold_snapshot DESC LIMIT 8"
     ).fetchall()
     categories = database.execute(
         """
         SELECT c.id, c.name, COUNT(p.id) AS product_count
         FROM categories c JOIN products p ON p.category_id = c.id
-        WHERE p.is_active = 1 GROUP BY c.id ORDER BY product_count DESC LIMIT 6
+        WHERE p.is_active = 1 GROUP BY c.id, c.name ORDER BY product_count DESC LIMIT 6
         """
     ).fetchall()
     stats = database.execute(
@@ -59,7 +60,7 @@ def products():
     where = ["p.is_active = 1"]
     params: list = []
     if query:
-        where.append("(p.name LIKE ? OR p.product_code LIKE ? OR p.brand_name LIKE ?)")
+        where.append("(LOWER(p.name) LIKE LOWER(?) OR LOWER(p.product_code) LIKE LOWER(?) OR LOWER(p.brand_name) LIKE LOWER(?))")
         token = f"%{query}%"
         params.extend([token, token, token])
     if category_id:
@@ -82,7 +83,7 @@ def products():
     rows = database.execute(
         PRODUCT_SELECT
         + where_sql
-        + f" GROUP BY p.id ORDER BY {order_sql} LIMIT ? OFFSET ?",
+        + f" ORDER BY {order_sql} LIMIT ? OFFSET ?",
         (*params, per_page, (page - 1) * per_page),
     ).fetchall()
     categories = database.execute(
@@ -107,13 +108,13 @@ def products():
 @bp.get("/products/<int:product_id>")
 def product_detail(product_id: int):
     product = get_db().execute(
-        PRODUCT_SELECT + " WHERE p.id = ? GROUP BY p.id", (product_id,)
+        PRODUCT_SELECT + " WHERE p.id = ?", (product_id,)
     ).fetchone()
     if product is None or not product["is_active"]:
         abort(404)
     related = get_db().execute(
         PRODUCT_SELECT
-        + " WHERE p.category_id = ? AND p.id != ? AND p.is_active = 1 GROUP BY p.id ORDER BY p.rating DESC LIMIT 4",
+        + " WHERE p.category_id = ? AND p.id != ? AND p.is_active = 1 ORDER BY p.rating DESC LIMIT 4",
         (product["category_id"], product_id),
     ).fetchall()
     return render_template("catalog/product_detail.html", product=product, related=related)
@@ -134,8 +135,8 @@ def product_lookup():
         JOIN platforms pl ON pl.id = p.platform_id
         LEFT JOIN inventory i ON i.product_id = p.id
         WHERE p.is_active = 1
-          AND (p.product_code LIKE ? OR p.name LIKE ? OR pl.name LIKE ?)
-        GROUP BY p.id ORDER BY p.name LIMIT 20
+          AND (LOWER(p.product_code) LIKE LOWER(?) OR LOWER(p.name) LIKE LOWER(?) OR LOWER(pl.name) LIKE LOWER(?))
+        GROUP BY p.id, p.product_code, p.name, p.current_price ORDER BY p.name LIMIT 20
         """,
         (token, token, token),
     ).fetchall()
