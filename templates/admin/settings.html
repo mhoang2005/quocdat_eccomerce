@@ -14,6 +14,25 @@
         <details class="inline-create"><summary>+ Add warehouse</summary><form method="post" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="entity" value="warehouse"><label>Warehouse code<input name="code" required placeholder="WH-DN"></label><label>Warehouse name<input name="name" required></label><label>Address<input name="address" required></label><button class="button" type="submit">Add warehouse</button></form></details>
       </section>
     </div>
+    <section class="panel">
+      <div class="panel-heading"><h2>Staff warehouse access</h2></div>
+      <div class="entity-list">
+        {% for assignment in assignments %}
+          <article><strong>{{ assignment['full_name'] }}</strong><span>{{ assignment['warehouse_code'] }}</span></article>
+        {% else %}<p class="muted">No warehouses assigned.</p>{% endfor %}
+      </div>
+      <form action="{{ url_for('admin.warehouse_access') }}" method="post" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Employee<select name="employee_id" required><option value="">Select employee</option>
+          {% for employee in employees %}<option value="{{ employee['id'] }}">{{ employee['full_name'] }}</option>{% endfor %}
+        </select></label>
+        <label>Warehouse<select name="warehouse_id" required><option value="">Select warehouse</option>
+          {% for warehouse in warehouses %}<option value="{{ warehouse['id'] }}">{{ warehouse['warehouse_code'] }} · {{ warehouse['name'] }}</option>{% endfor %}
+        </select></label>
+        <button class="button" type="submit" name="action" value="grant">Grant access</button>
+        <button class="button" type="submit" name="action" value="revoke">Revoke access</button>
+      </form>
+    </section>
   </section>
 </div>
 {% endblock %}

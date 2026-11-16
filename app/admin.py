@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import sqlite3
+import json
 from datetime import datetime, timezone
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 
-from .db import get_db
-from .security import role_required
+from .db import DATABASE_ERRORS, get_db, sqlserver_enabled
+from .security import mask_email, mask_phone, role_required
 from .services.analytics import MATERIALIZED_VIEWS, olap_status, refresh_olap
 from .services.analytics_dashboard import build_analytics_dashboard
 from .services.etl import run_etl, warehouse_counts
@@ -32,7 +32,8 @@ def dashboard():
     }
     recent_orders = database.execute(
         """
-        SELECT o.*, u.full_name, inv.invoice_number
+        SELECT o.order_number, o.created_at, o.status, o.total_amount,
+               u.full_name, inv.invoice_number
         FROM orders o JOIN users u ON u.id = o.customer_id
         JOIN invoices inv ON inv.order_id = o.id
         ORDER BY o.created_at DESC LIMIT 6
@@ -53,7 +54,12 @@ def dashboard():
 @bp.get("/analytics")
 @role_required("admin")
 def analytics_dashboard():
-    dashboard_data = build_analytics_dashboard(get_db("dwh"), dict(request.args))
+    database = get_db("dwh")
+    database.execute("BEGIN")
+    try:
+        dashboard_data = build_analytics_dashboard(database, dict(request.args))
+    finally:
+        database.rollback()
     return render_template("admin/analytics.html", **dashboard_data)
 
 
@@ -67,19 +73,20 @@ def products():
     params: list = []
     where = ""
     if query:
-        where = " WHERE p.product_code LIKE ? OR p.name LIKE ?"
+        where = " WHERE LOWER(p.product_code) LIKE LOWER(?) OR LOWER(p.name) LIKE LOWER(?)"
         params = [f"%{query}%", f"%{query}%"]
     count = database.execute("SELECT COUNT(*) AS n FROM products p" + where, params).fetchone()["n"]
     rows = database.execute(
         """
         SELECT p.*, c.name AS category_name, pl.name AS platform_name,
-               COALESCE(SUM(i.quantity_on_hand), 0) AS stock_quantity
+               COALESCE(i.stock, 0) AS stock_quantity
         FROM products p JOIN categories c ON c.id = p.category_id
         JOIN platforms pl ON pl.id = p.platform_id
-        LEFT JOIN inventory i ON i.product_id = p.id
+        LEFT JOIN (SELECT product_id, SUM(quantity_on_hand) AS stock FROM inventory GROUP BY product_id) i
+          ON i.product_id = p.id
         """
         + where
-        + " GROUP BY p.id ORDER BY p.id DESC LIMIT ? OFFSET ?",
+        + " ORDER BY p.id DESC LIMIT ? OFFSET ?",
         (*params, per_page, (page - 1) * per_page),
     ).fetchall()
     return render_template(
@@ -148,11 +155,19 @@ def edit_product(product_id: int):
 def users():
     role = request.args.get("role", "")
     database = get_db()
+    statement = "SELECT id, full_name, email, role, phone, city, created_at, is_active FROM users"
     if role in {"customer", "employee", "admin"}:
-        rows = database.execute("SELECT * FROM users WHERE role = ? ORDER BY created_at DESC", (role,)).fetchall()
+        rows = database.execute(statement + " WHERE role = ? ORDER BY created_at DESC", (role,))
     else:
-        rows = database.execute("SELECT * FROM users ORDER BY role, created_at DESC").fetchall()
-    return render_template("admin/users.html", users=rows, selected_role=role)
+        rows = database.execute(statement + " ORDER BY role, created_at DESC")
+    accounts = []
+    for row in rows:
+        account = dict(row)
+        if account["id"] != g.user["id"]:
+            account["email"] = mask_email(account["email"])
+            account["phone"] = mask_phone(account["phone"])
+        accounts.append(account)
+    return render_template("admin/users.html", users=accounts, selected_role=role)
 
 
 @bp.post("/users/<int:user_id>/toggle")
@@ -207,7 +222,7 @@ def settings():
             else:
                 raise ValueError("Invalid configuration type.")
             database.commit()
-        except (ValueError, sqlite3.Error) as exc:
+        except (ValueError, *DATABASE_ERRORS) as exc:
             database.rollback()
             flash(str(exc), "error")
         else:
@@ -215,7 +230,58 @@ def settings():
             return redirect(url_for("admin.settings"))
     suppliers = database.execute("SELECT * FROM suppliers ORDER BY name").fetchall()
     warehouses = database.execute("SELECT * FROM warehouses ORDER BY name").fetchall()
-    return render_template("admin/settings.html", suppliers=suppliers, warehouses=warehouses)
+    employees = database.execute(
+        "SELECT id, full_name FROM users WHERE role = 'employee' ORDER BY full_name, id"
+    ).fetchall()
+    assignments = database.execute(
+        """
+        SELECT u.full_name, w.warehouse_code FROM employee_warehouse ew
+        JOIN users u ON u.id = ew.employee_id JOIN warehouses w ON w.id = ew.warehouse_id
+        WHERE u.role = 'employee' ORDER BY u.full_name, w.warehouse_code
+        """
+    ).fetchall()
+    return render_template(
+        "admin/settings.html", suppliers=suppliers, warehouses=warehouses,
+        employees=employees, assignments=assignments,
+    )
+
+
+@bp.post("/settings/warehouse-access")
+@role_required("admin")
+def warehouse_access():
+    employee_id = request.form.get("employee_id", type=int)
+    warehouse_id = request.form.get("warehouse_id", type=int)
+    action = request.form.get("action")
+    if action not in {"grant", "revoke"}:
+        abort(400)
+    database = get_db()
+    with database:
+        database.execute("BEGIN IMMEDIATE")
+        if not database.execute(
+            "SELECT 1 FROM users WHERE id = ? AND role = 'employee'", (employee_id,)
+        ).fetchone() or not database.execute(
+            "SELECT 1 FROM warehouses WHERE id = ?", (warehouse_id,)
+        ).fetchone():
+            abort(400)
+        if action == "grant":
+            cursor = database.execute(
+                "INSERT OR IGNORE INTO employee_warehouse VALUES (?, ?)", (employee_id, warehouse_id)
+            )
+        else:
+            cursor = database.execute(
+                "DELETE FROM employee_warehouse WHERE employee_id = ? AND warehouse_id = ?",
+                (employee_id, warehouse_id),
+            )
+        if cursor.rowcount:
+            database.execute(
+                """
+                INSERT INTO audit_log(actor_user_id, action, entity_type, entity_id, details)
+                VALUES (?, ?, 'USER', ?, ?)
+                """,
+                (g.user["id"], f"{action.upper()}_WAREHOUSE_ACCESS", employee_id, f"warehouse_id={warehouse_id}"),
+            )
+    flash("Warehouse access saved.", "success")
+    return redirect(url_for("admin.settings"))
 
 
 @bp.get("/etl")
@@ -224,7 +290,25 @@ def etl_status():
     staging = get_db("staging")
     dwh = get_db("dwh")
     counts = warehouse_counts()
-    runs = dwh.execute("SELECT * FROM etl_run ORDER BY started_at DESC LIMIT 20").fetchall()
+    runs = []
+    for row in dwh.execute("SELECT * FROM etl_run ORDER BY started_at DESC, rowid DESC LIMIT 20"):
+        run = dict(row)
+        run["sales_cdc"] = None
+        if run["status"] == "SUCCESS" and run["message"]:
+            try:
+                run["sales_cdc"] = json.loads(run["message"]).get("staging", {}).get("sales_cdc")
+            except (ValueError, AttributeError):
+                pass
+        runs.append(run)
+    checkpoint = staging.execute("SELECT event_id FROM cdc_checkpoint WHERE stream = 'sales'").fetchone()
+    pending_events = get_db().execute(
+        "SELECT COUNT(*) FROM cdc_event WHERE event_id > ?", (checkpoint[0] if checkpoint else 0,)
+    ).fetchone()[0]
+    month_sql = (
+        "SELECT COUNT(DISTINCT $PARTITION.pf_snapshot_month(date_key)) FROM fact_product_snapshot"
+        if sqlserver_enabled() else "SELECT COUNT(*) FROM snapshot_month WHERE dirty = 0"
+    )
+    ready_months = dwh.execute(month_sql).fetchone()[0]
     dq = staging.execute(
         """
         SELECT dq_status, COUNT(*) AS row_count,
@@ -236,7 +320,9 @@ def etl_status():
         "SELECT * FROM etl_batch ORDER BY source_started_at DESC LIMIT 10"
     ).fetchall()
     return render_template(
-        "admin/etl.html", counts=counts, runs=runs, dq=dq, batches=batches
+        "admin/etl.html", counts=counts, runs=runs, dq=dq, batches=batches,
+        checkpoint=checkpoint[0] if checkpoint else None, pending_events=pending_events,
+        ready_months=ready_months,
     )
 
 
@@ -260,7 +346,6 @@ def olap():
 
     platform = request.args.get("platform", "ALL").strip()
     category = request.args.get("category", "").strip()
-    customer = request.args.get("customer", "ALL").strip()
     city = request.args.get("city", "ALL").strip()
     pivot_mode = request.args.get("pivot", "product")
     pivot_configs = {
@@ -268,19 +353,19 @@ def olap():
             "label": "Product × Time",
             "member_label": "Product category",
             "member_column": "category_name",
-            "grouping_mask": 13,
+            "grouping_mask": 5,
         },
         "location": {
             "label": "Location × Time",
             "member_label": "Customer city",
             "member_column": "customer_city",
-            "grouping_mask": 7,
+            "grouping_mask": 3,
         },
         "seller": {
             "label": "Store/Seller × Time",
             "member_label": "Seller channel",
             "member_column": "platform_name",
-            "grouping_mask": 14,
+            "grouping_mask": 6,
         },
     }
     if pivot_mode not in pivot_configs:
@@ -290,7 +375,6 @@ def olap():
     for column, selected in (
         ("platform_name", platform),
         ("category_name", category),
-        ("customer_name", customer),
         ("customer_city", city),
     ):
         members = [
@@ -307,7 +391,6 @@ def olap():
     for column, selected in (
         ("platform_name", platform),
         ("category_name", category),
-        ("customer_name", customer),
         ("customer_city", city),
     ):
         if selected:
@@ -326,8 +409,7 @@ def olap():
         """
         SELECT * FROM cube_sales
         WHERE time_level = 'ALL' AND platform_name = 'ALL'
-          AND category_name = 'ALL' AND customer_name = 'ALL'
-          AND customer_city = 'ALL'
+          AND category_name = 'ALL' AND customer_city = 'ALL'
         LIMIT 1
         """
     ).fetchone()

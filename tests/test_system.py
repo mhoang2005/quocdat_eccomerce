@@ -235,7 +235,7 @@ def test_materialized_views_and_sales_cube_are_populated_and_idempotent(app):
             """
             SELECT * FROM cube_sales
             WHERE time_level = 'ALL' AND platform_name = 'ALL'
-              AND category_name = 'ALL' AND customer_name = 'ALL'
+              AND category_name = 'ALL'
               AND customer_city = 'ALL'
             """
         ).fetchone()
@@ -254,11 +254,11 @@ def test_materialized_views_and_sales_cube_are_populated_and_idempotent(app):
             for row in dwh.execute("SELECT DISTINCT grouping_mask FROM cube_sales")
         }
         assert levels == {"DAY", "MONTH", "QUARTER", "YEAR", "ALL"}
-        assert masks == set(range(16))
+        assert masks == set(range(8))
         assert dwh.execute(
             """
             SELECT COUNT(*) AS n FROM cube_sales
-            WHERE customer_name != 'ALL' AND customer_city != 'ALL'
+            WHERE customer_city != 'ALL'
             """
         ).fetchone()["n"] >= 1
 
@@ -279,7 +279,7 @@ def test_materialized_views_and_sales_cube_are_populated_and_idempotent(app):
 def test_admin_can_explore_and_refresh_olap_layer(client, app, csrf_token):
     login_as(client, app, "admin@quocdat.local")
     response = client.get(
-        "/admin/olap?level=YEAR&platform=Tiki&category=&customer=ALL&city=ALL&pivot=location"
+        "/admin/olap?level=YEAR&platform=Tiki&category=&city=ALL&pivot=location"
     )
     assert response.status_code == 200
     assert b"Cube Explorer" in response.data

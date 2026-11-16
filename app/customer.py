@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 
-from .db import get_db
+from .db import DATABASE_ERRORS, get_db
 from .security import role_required
 
 
@@ -31,16 +30,17 @@ def _cart_rows(database):
         """
         SELECT ci.id AS cart_item_id, ci.quantity, p.*, c.name AS category_name,
                pl.name AS platform_name,
-               COALESCE(SUM(i.quantity_on_hand), 0) AS stock_quantity,
+               COALESCE(i.stock, 0) AS stock_quantity,
                ci.quantity * p.current_price AS line_total
         FROM carts ca
         JOIN cart_items ci ON ci.cart_id = ca.id
         JOIN products p ON p.id = ci.product_id
         JOIN categories c ON c.id = p.category_id
         JOIN platforms pl ON pl.id = p.platform_id
-        LEFT JOIN inventory i ON i.product_id = p.id
+        LEFT JOIN (SELECT product_id, SUM(quantity_on_hand) AS stock FROM inventory GROUP BY product_id) i
+          ON i.product_id = p.id
         WHERE ca.customer_id = ?
-        GROUP BY ci.id ORDER BY ci.created_at DESC
+        ORDER BY ci.created_at DESC
         """,
         (g.user["id"],),
     ).fetchall()
@@ -70,7 +70,7 @@ def add_to_cart(product_id: int):
         """
         SELECT p.id, p.is_active, COALESCE(SUM(i.quantity_on_hand), 0) AS stock
         FROM products p LEFT JOIN inventory i ON i.product_id = p.id
-        WHERE p.id = ? GROUP BY p.id
+        WHERE p.id = ? GROUP BY p.id, p.is_active
         """,
         (product_id,),
     ).fetchone()
@@ -85,10 +85,11 @@ def add_to_cart(product_id: int):
         INSERT INTO cart_items(cart_id, product_id, quantity)
         VALUES (?, ?, ?)
         ON CONFLICT(cart_id, product_id) DO UPDATE SET
-            quantity = MIN(cart_items.quantity + excluded.quantity, ?),
+            quantity = CASE WHEN cart_items.quantity + excluded.quantity > ?
+                THEN ? ELSE cart_items.quantity + excluded.quantity END,
             updated_at = CURRENT_TIMESTAMP
         """,
-        (cart_id, product_id, quantity, product["stock"]),
+        (cart_id, product_id, quantity, product["stock"], product["stock"]),
     )
     database.commit()
     flash("Product added to your cart.", "success")
@@ -102,11 +103,12 @@ def update_cart(item_id: int):
     database = get_db()
     item = database.execute(
         """
-        SELECT ci.*, COALESCE(SUM(i.quantity_on_hand), 0) AS stock
+        SELECT ci.*, COALESCE(i.stock, 0) AS stock
         FROM cart_items ci
         JOIN carts c ON c.id = ci.cart_id
-        LEFT JOIN inventory i ON i.product_id = ci.product_id
-        WHERE ci.id = ? AND c.customer_id = ? GROUP BY ci.id
+        LEFT JOIN (SELECT product_id, SUM(quantity_on_hand) AS stock FROM inventory GROUP BY product_id) i
+          ON i.product_id = ci.product_id
+        WHERE ci.id = ? AND c.customer_id = ?
         """,
         (item_id, g.user["id"]),
     ).fetchone()
@@ -237,7 +239,7 @@ def checkout():
                     (g.user["id"], order_id, f"Order {order_number}; total {total}"),
                 )
                 database.commit()
-            except (ValueError, sqlite3.Error) as exc:
+            except (ValueError, *DATABASE_ERRORS) as exc:
                 database.rollback()
                 flash(str(exc), "error")
             else:
@@ -257,11 +259,11 @@ def checkout():
 def orders():
     rows = get_db().execute(
         """
-        SELECT o.*, inv.invoice_number, COUNT(oi.id) AS item_count
+        SELECT o.*, inv.invoice_number, oi.item_count
         FROM orders o
         JOIN invoices inv ON inv.order_id = o.id
-        JOIN order_items oi ON oi.order_id = o.id
-        WHERE o.customer_id = ? GROUP BY o.id ORDER BY o.created_at DESC
+        JOIN (SELECT order_id, COUNT(*) AS item_count FROM order_items GROUP BY order_id) oi ON oi.order_id = o.id
+        WHERE o.customer_id = ? ORDER BY o.created_at DESC
         """,
         (g.user["id"],),
     ).fetchall()

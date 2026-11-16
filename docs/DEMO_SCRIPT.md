@@ -39,9 +39,9 @@ Run `start_demo.bat`, open the home page, and summarize the pipeline: `Web/OLTP 
 3. Explain why SQLite uses indexed physical aggregate tables instead of native Materialized Views.
 4. In Cube Explorer, use Roll-up from `DAY` to `YEAR`, then Drill-down to `QUARTER`.
 5. Slice Store/Seller to one platform, dice Product and Location, and click “Apply Slice / Dice.”
-6. Point out the five course dimensions: Time, Product, Customer, Location, and Store/Seller. Explain that Category represents Product, Customer City represents Location, and Platform is the available Store/Seller channel.
+6. Point out the analytical dimensions: Time, Product, Location, and Store/Seller. Explain that Category represents Product, Customer City represents Location, Platform is the available Store/Seller channel, and Customer is intentionally kept as an aggregate metric (`customer_count`) to avoid high-cardinality cube explosion.
 7. Switch Pivot View from “Product × Time” to “Location × Time.”
-8. Explain that each time level has all 16 detailed/`ALL` grouping sets and that the grand total reconciles with `Fact_Sales`.
+8. Explain that each time level has all 8 detailed/`ALL` grouping sets and that the grand total reconciles with `Fact_Sales`.
 
 ## 6. Analytics Dashboard and Drill-across — 2 minutes
 

@@ -50,7 +50,6 @@ SELECT time_level, time_label, order_count, quantity_sold, net_revenue
 FROM cube_sales
 WHERE platform_name = 'ALL'
   AND category_name = 'ALL'
-  AND customer_name = 'ALL'
   AND customer_city = 'ALL'
 ORDER BY CASE time_level
     WHEN 'DAY' THEN 1 WHEN 'MONTH' THEN 2 WHEN 'QUARTER' THEN 3
@@ -59,12 +58,11 @@ ORDER BY CASE time_level
 
 -- 7. Slice by platform and dice by category at the yearly level
 SELECT time_label, platform_name, category_name,
-       customer_name, customer_city, order_count, customer_count,
+       customer_city, order_count, customer_count,
        quantity_sold, net_revenue
 FROM cube_sales
 WHERE time_level = 'YEAR'
   AND platform_name = 'Tiki'
-  AND customer_name = 'ALL'
   AND customer_city = 'ALL'
 ORDER BY net_revenue DESC;
 
@@ -79,5 +77,5 @@ UNION ALL
 SELECT 'CUBE', line_count, quantity_sold, net_revenue
 FROM cube_sales
 WHERE time_level = 'ALL' AND platform_name = 'ALL'
-  AND category_name = 'ALL' AND customer_name = 'ALL'
+  AND category_name = 'ALL'
   AND customer_city = 'ALL';

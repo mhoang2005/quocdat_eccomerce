@@ -3,6 +3,8 @@ from __future__ import annotations
 from calendar import month_abbr
 from math import ceil
 
+from .snapshot_partitions import snapshot_source
+
 
 def _integer(value, default: int | None = None) -> int | None:
     try:
@@ -182,25 +184,30 @@ def _inventory_metrics(connection, filters: dict) -> dict:
 
 
 def _marketplace_metrics(connection, filters: dict) -> dict:
-    where, params = _where(
-        filters,
-        {
-            "year": "d.year_number",
-            "month": "d.month_number",
-            "category": "pr.category_name",
-            "platform": "p.platform_name",
-        },
-    )
+    year, month = filters["year"], filters["month"]
+    source = snapshot_source(connection, year, month)
+    clauses, params = [], []
+    if year is not None:
+        first_day = year * 10000 + (month or 1) * 100 + 1
+        end_day = first_day + 100 if month else (year + 1) * 10000 + 101
+        clauses.append("f.date_key >= ? AND f.date_key < ?")
+        params.extend((first_day, end_day))
+    if filters["category"]:
+        clauses.append("pr.category_name = ?")
+        params.append(filters["category"])
+    if filters["platform"]:
+        clauses.append("f.platform_key IN (SELECT platform_key FROM dim_platform WHERE platform_name = ?)")
+        params.append(filters["platform"])
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
     row = connection.execute(
-        """
+        f"""
         WITH filtered AS (
             SELECT f.date_key, d.full_date, f.product_key, f.sale_price,
                    f.discount_rate, f.rating, f.review_count,
                    f.quantity_sold_snapshot
-            FROM fact_product_snapshot f
+            FROM {source} f
             JOIN dim_date d ON d.date_key = f.date_key
             JOIN dim_product pr ON pr.product_key = f.product_key
-            JOIN dim_platform p ON p.platform_key = f.platform_key
         """
         + where
         + """
@@ -518,9 +525,12 @@ def _drill_across(connection, filters: dict) -> list[dict]:
                COALESCE(i.quantity_on_hand, 0) AS quantity_on_hand,
                COALESCE(i.inventory_value, 0) AS inventory_value
         FROM grain g
-        LEFT JOIN sales s USING(date_key, full_date, category_name, warehouse_name)
-        LEFT JOIN procurement p USING(date_key, full_date, category_name, warehouse_name)
-        LEFT JOIN inventory i USING(date_key, full_date, category_name, warehouse_name)
+        LEFT JOIN sales s ON s.date_key = g.date_key AND s.full_date = g.full_date
+            AND s.category_name = g.category_name AND s.warehouse_name = g.warehouse_name
+        LEFT JOIN procurement p ON p.date_key = g.date_key AND p.full_date = g.full_date
+            AND p.category_name = g.category_name AND p.warehouse_name = g.warehouse_name
+        LEFT JOIN inventory i ON i.date_key = g.date_key AND i.full_date = g.full_date
+            AND i.category_name = g.category_name AND i.warehouse_name = g.warehouse_name
         ORDER BY g.date_key DESC,
                  (COALESCE(s.quantity_sold, 0) +
                   COALESCE(p.quantity_received, 0)) DESC,

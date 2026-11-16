@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS fact_sales (
     discount_amount REAL NOT NULL,
     gross_amount REAL NOT NULL,
     net_amount REAL NOT NULL,
-    loaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    loaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    source_order_id INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_fact_sales_date_product ON fact_sales(date_key, product_key);
@@ -150,6 +151,39 @@ CREATE TABLE IF NOT EXISTS fact_product_snapshot (
 
 CREATE INDEX IF NOT EXISTS idx_fact_product_snapshot_date_product
 ON fact_product_snapshot(date_key, product_key);
+
+CREATE INDEX IF NOT EXISTS idx_fact_snapshot_platform_date_price
+ON fact_product_snapshot(platform_key, date_key, sale_price);
+
+CREATE TABLE IF NOT EXISTS snapshot_month (
+    month_key INTEGER PRIMARY KEY,
+    dirty INTEGER NOT NULL CHECK (dirty IN (0, 1))
+);
+
+INSERT OR IGNORE INTO snapshot_month(month_key, dirty)
+SELECT DISTINCT date_key / 100, 1 FROM fact_product_snapshot
+WHERE NOT EXISTS (SELECT 1 FROM snapshot_month);
+
+CREATE TRIGGER IF NOT EXISTS snapshot_month_after_insert
+AFTER INSERT ON fact_product_snapshot
+BEGIN
+    INSERT INTO snapshot_month VALUES (NEW.date_key / 100, 1)
+    ON CONFLICT(month_key) DO UPDATE SET dirty = 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS snapshot_month_after_update
+AFTER UPDATE ON fact_product_snapshot
+BEGIN
+    INSERT INTO snapshot_month VALUES (OLD.date_key / 100, 1), (NEW.date_key / 100, 1)
+    ON CONFLICT(month_key) DO UPDATE SET dirty = 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS snapshot_month_after_delete
+AFTER DELETE ON fact_product_snapshot
+BEGIN
+    INSERT INTO snapshot_month VALUES (OLD.date_key / 100, 1)
+    ON CONFLICT(month_key) DO UPDATE SET dirty = 1;
+END;
 
 CREATE TABLE IF NOT EXISTS etl_run (
     run_id TEXT PRIMARY KEY,
@@ -262,9 +296,10 @@ ON mv_marketplace_daily(year_number, month_number, platform_name, category_name)
 
 -- Precomputed Sales Cube aligned with the course model. Time is represented
 -- by a hierarchy level while the other dimensions map as follows:
--- Product=Category, Customer=Dim_Customer member, Location=Customer City,
--- Store/Seller=Platform sales channel. grouping_mask uses bit 1=Store/Seller
--- ALL, bit 2=Product ALL, bit 4=Customer ALL, bit 8=Location ALL.
+-- Product=Category, Location=Customer City, Store/Seller=Platform sales channel.
+-- Customer is preserved as a metric (customer_count) rather than a high-cardinality
+-- dimension to avoid cube explosion.
+-- grouping_mask uses bit 1=Store/Seller ALL, bit 2=Product ALL, bit 4=Location ALL.
 CREATE TABLE IF NOT EXISTS cube_sales (
     cube_key INTEGER PRIMARY KEY AUTOINCREMENT,
     time_level TEXT NOT NULL CHECK (time_level IN ('DAY', 'MONTH', 'QUARTER', 'YEAR', 'ALL')),
@@ -276,9 +311,8 @@ CREATE TABLE IF NOT EXISTS cube_sales (
     month_number INTEGER,
     platform_name TEXT NOT NULL,
     category_name TEXT NOT NULL,
-    customer_name TEXT NOT NULL,
     customer_city TEXT NOT NULL,
-    grouping_mask INTEGER NOT NULL CHECK (grouping_mask BETWEEN 0 AND 15),
+    grouping_mask INTEGER NOT NULL CHECK (grouping_mask BETWEEN 0 AND 7),
     order_count INTEGER NOT NULL,
     customer_count INTEGER NOT NULL,
     line_count INTEGER NOT NULL,
@@ -289,14 +323,13 @@ CREATE TABLE IF NOT EXISTS cube_sales (
     average_selling_price REAL NOT NULL,
     refreshed_at TEXT NOT NULL,
     UNIQUE (
-        time_level, time_key, platform_name, category_name,
-        customer_name, customer_city
+        time_level, time_key, platform_name, category_name, customer_city
     )
 );
 
 CREATE INDEX IF NOT EXISTS idx_cube_sales_slice
 ON cube_sales(
-    time_level, platform_name, category_name, customer_name, customer_city
+    time_level, platform_name, category_name, customer_city
 );
 CREATE INDEX IF NOT EXISTS idx_cube_sales_rollup
 ON cube_sales(time_level, time_key, grouping_mask);

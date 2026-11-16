@@ -9,9 +9,11 @@ import click
 from flask import current_app
 from werkzeug.security import generate_password_hash
 
-from app.db import close_db, execute_script, get_db, table_exists
+from app.db import close_db, execute_script, get_db, sqlserver_enabled, table_exists
 
+from .analytics import ensure_olap_schema
 from .raw_loader import product_code, stage_raw_products
+from .snapshot_partitions import refresh_snapshot_months
 
 
 DEMO_ACCOUNTS = (
@@ -26,6 +28,8 @@ def _utcnow() -> str:
 
 
 def _reset_files() -> None:
+    if sqlserver_enabled():
+        raise ValueError("Use empty SQL Server databases for a fresh initialization")
     close_db()
     for key in ("OLTP_DATABASE", "STAGING_DATABASE", "DWH_DATABASE"):
         path = Path(current_app.config[key]).resolve()
@@ -279,6 +283,7 @@ def initialize_system(reset: bool = False, product_limit: int | None = None, run
 
     _seed_reference_data()
     _seed_users()
+    install_oltp_features()
 
     staging = get_db("staging")
     if staging.execute("SELECT COUNT(*) AS n FROM stg_product_snapshot").fetchone()["n"] == 0:
@@ -319,9 +324,59 @@ def initialize_system(reset: bool = False, product_limit: int | None = None, run
     return {"products": product_count, "raw": raw_stats, "etl": etl_result}
 
 
+def install_oltp_features() -> None:
+    if sqlserver_enabled():
+        connection = get_db()
+        if table_exists("oltp", "oltp_feature_migration") and connection.execute(
+            "SELECT 1 FROM oltp_feature_migration WHERE name = 'sales_cdc_and_warehouse_scope'"
+        ).fetchone():
+            return
+        execute_script("oltp", "oltp_features.sql")
+        provision_sqlserver_demo_access()
+    elif not table_exists("oltp", "oltp_feature_migration"):
+        execute_script("oltp", "oltp_features.sql")
+
+
+def provision_sqlserver_demo_access():
+    connection = get_db()
+    with connection:
+        if not connection.in_transaction:
+            connection.begin()
+        if connection.execute(
+            "SELECT 1 FROM oltp_feature_migration WHERE name = 'sales_cdc_and_warehouse_scope'"
+        ).fetchone():
+            return
+        staff = connection.execute(
+            "SELECT id FROM users WHERE email = 'employee@quocdat.local' AND role = 'employee'"
+        ).fetchone()
+        warehouse = connection.execute("SELECT id FROM warehouses WHERE warehouse_code = 'WH-HN'").fetchone()
+        if staff and warehouse:
+            connection.execute("INSERT OR IGNORE INTO employee_warehouse VALUES (?, ?)", (staff[0], warehouse[0]))
+        connection.execute("INSERT INTO oltp_feature_migration VALUES ('sales_cdc_and_warehouse_scope')")
+
+
+def upgrade_existing_system() -> None:
+    install_oltp_features()
+    if not table_exists("staging", "cdc_checkpoint"):
+        execute_script("staging", "staging_schema.sql")
+    if sqlserver_enabled():
+        return
+    if not table_exists("dwh", "snapshot_month"):
+        ensure_olap_schema()
+    connection = get_db("dwh")
+    if connection.execute("SELECT 1 FROM snapshot_month WHERE dirty = 1 LIMIT 1").fetchone():
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            refresh_snapshot_months(connection)
+
+
 def ensure_initialized() -> None:
     if not table_exists("oltp", "users"):
+        if sqlserver_enabled():
+            raise ValueError("Run migrate-sqlserver to set up the SQL Server databases")
         initialize_system()
+    else:
+        upgrade_existing_system()
 
 
 @click.command("init-system")
@@ -334,3 +389,9 @@ def init_system_command(reset: bool, limit: int | None) -> None:
 
 def init_app(app) -> None:
     app.cli.add_command(init_system_command)
+
+    @app.before_request
+    def upgrade_on_first_request():
+        if not app.config.get("FEATURE_SCHEMA_READY") and table_exists("oltp", "users"):
+            upgrade_existing_system()
+            app.config["FEATURE_SCHEMA_READY"] = True

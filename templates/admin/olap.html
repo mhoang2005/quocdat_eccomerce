@@ -46,8 +46,8 @@
 
     <section class="panel">
       <div class="panel-heading">
-        <div><p class="eyebrow">Course-aligned five-dimensional Sales Cube</p><h2>Cube Explorer</h2></div>
-        <div class="cube-legend"><span>Time</span><span>Product</span><span>Customer</span><span>Location</span><span>Store/Seller</span></div>
+        <div><p class="eyebrow">Course-aligned four-dimensional Sales Cube</p><h2>Cube Explorer</h2></div>
+        <div class="cube-legend"><span>Time</span><span>Product</span><span>Location</span><span>Store/Seller</span></div>
       </div>
 
       {% if grand_total %}
@@ -62,8 +62,8 @@
       <div class="cube-operation-bar" aria-label="Roll-up and Drill-down controls">
         <div><small>Current time member level</small><strong>{{ selected_level|title }}</strong></div>
         <div class="cube-operation-actions">
-          {% if rollup_level %}<a class="button button-small button-secondary" href="{{ url_for('admin.olap', level=rollup_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], customer=dimensions['customer_name']['selected'], city=dimensions['customer_city']['selected'], pivot=pivot_mode) }}">↑ Roll up to {{ rollup_level|title }}</a>{% else %}<span class="button button-small button-secondary disabled" aria-disabled="true">Highest level</span>{% endif %}
-          {% if drilldown_level %}<a class="button button-small button-secondary" href="{{ url_for('admin.olap', level=drilldown_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], customer=dimensions['customer_name']['selected'], city=dimensions['customer_city']['selected'], pivot=pivot_mode) }}">↓ Drill down to {{ drilldown_level|title }}</a>{% else %}<span class="button button-small button-secondary disabled" aria-disabled="true">Lowest level</span>{% endif %}
+          {% if rollup_level %}<a class="button button-small button-secondary" href="{{ url_for('admin.olap', level=rollup_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], city=dimensions['customer_city']['selected'], pivot=pivot_mode) }}">↑ Roll up to {{ rollup_level|title }}</a>{% else %}<span class="button button-small button-secondary disabled" aria-disabled="true">Highest level</span>{% endif %}
+          {% if drilldown_level %}<a class="button button-small button-secondary" href="{{ url_for('admin.olap', level=drilldown_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], city=dimensions['customer_city']['selected'], pivot=pivot_mode) }}">↓ Drill down to {{ drilldown_level|title }}</a>{% else %}<span class="button button-small button-secondary disabled" aria-disabled="true">Lowest level</span>{% endif %}
         </div>
       </div>
 
@@ -90,13 +90,6 @@
             {% for member in dimensions['category_name']['members'] %}<option value="{{ member }}" {% if dimensions['category_name']['selected'] == member %}selected{% endif %}>{{ member }}</option>{% endfor %}
           </select>
         </label>
-        <label>Customer dice
-          <select name="customer">
-            <option value="">Any cube member</option>
-            <option value="ALL" {% if dimensions['customer_name']['selected'] == 'ALL' %}selected{% endif %}>ALL (rolled up)</option>
-            {% for member in dimensions['customer_name']['members'] %}<option value="{{ member }}" {% if dimensions['customer_name']['selected'] == member %}selected{% endif %}>{{ member }}</option>{% endfor %}
-          </select>
-        </label>
         <label>Location dice
           <select name="city">
             <option value="">Any cube member</option>
@@ -109,16 +102,16 @@
 
       <div class="table-wrap cube-table-wrap">
         <table>
-          <thead><tr><th>Time member</th><th>Store/Seller</th><th>Product</th><th>Customer</th><th>Location</th><th class="number">Orders</th><th class="number">Units</th><th class="number">Net revenue</th><th>Mask</th></tr></thead>
+          <thead><tr><th>Time member</th><th>Store/Seller</th><th>Product</th><th>Location</th><th class="number">Orders</th><th class="number">Customers</th><th class="number">Units</th><th class="number">Net revenue</th><th>Mask</th></tr></thead>
           <tbody>
             {% for row in cube_rows %}
               <tr>
                 <td><strong>{{ row['time_label'] }}</strong><small>{{ row['time_level'] }}</small></td>
                 <td>{{ row['platform_name'] }}</td>
                 <td>{{ row['category_name'] }}</td>
-                <td>{{ row['customer_name'] }}</td>
                 <td>{{ row['customer_city'] }}</td>
                 <td class="number">{{ row['order_count'] }}</td>
+                <td class="number">{{ row['customer_count'] }}</td>
                 <td class="number">{{ row['quantity_sold'] }}</td>
                 <td class="number"><strong>{{ row['net_revenue'] | money }}</strong></td>
                 <td><code>{{ row['grouping_mask'] }}</code></td>
@@ -129,7 +122,7 @@
           </tbody>
         </table>
       </div>
-      <p class="olap-note">Dimension mapping: Product = category, Store/Seller = marketplace platform, Location = customer city. Grouping mask: bit 1 = Store/Seller ALL, bit 2 = Product ALL, bit 4 = Customer ALL, bit 8 = Location ALL. Time hierarchy is represented by <code>time_level</code>.</p>
+      <p class="olap-note">Dimension mapping: Product = category, Store/Seller = marketplace platform, Location = customer city. Grouping mask: bit 1 = Store/Seller ALL, bit 2 = Product ALL, bit 4 = Location ALL. Time hierarchy is represented by <code>time_level</code>.</p>
     </section>
 
     <section class="panel">
@@ -137,7 +130,7 @@
         <div><p class="eyebrow">Pivot operation</p><h2>Pivot View</h2><p>Rotate one analytical dimension against the current Time level while all other dimensions are rolled up.</p></div>
         <nav class="filter-tabs" aria-label="Pivot orientation">
           {% for mode, label in [('product', 'Product × Time'), ('location', 'Location × Time'), ('seller', 'Store/Seller × Time')] %}
-            <a class="{% if pivot_mode == mode %}active{% endif %}" href="{{ url_for('admin.olap', level=selected_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], customer=dimensions['customer_name']['selected'], city=dimensions['customer_city']['selected'], pivot=mode) }}">{{ label }}</a>
+            <a class="{% if pivot_mode == mode %}active{% endif %}" href="{{ url_for('admin.olap', level=selected_level, platform=dimensions['platform_name']['selected'], category=dimensions['category_name']['selected'], city=dimensions['customer_city']['selected'], pivot=mode) }}">{{ label }}</a>
           {% endfor %}
         </nav>
       </div>

@@ -1,0 +1,10 @@
+SELECT
+    {
+        [Measures].[Sales Line Count],
+        [Measures].[Order Count],
+        [Measures].[Customer Count],
+        [Measures].[Units Sold],
+        [Measures].[Net Revenue],
+        [Measures].[Average Selling Price]
+    } ON COLUMNS
+FROM [Sales];
